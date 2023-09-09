@@ -1,3 +1,4 @@
+#pragma once
 /* -*- c-basic-offset: 4 indent-tabs-mode: nil -*-  vi:set ts=8 sts=4 sw=4: */
 
 /*
@@ -5,7 +6,7 @@
     An intonation analysis and annotation tool
     Centre for Digital Music, Queen Mary, University of London.
     This file copyright 2006-2012 Chris Cannam and QMUL.
-    
+
     This program is free software; you can redistribute it and/or
     modify it under the terms of the GNU General Public License as
     published by the Free Software Foundation; either version 2 of the
@@ -29,7 +30,7 @@ class MainWindow : public MainWindowBase
 
 public:
     MainWindow(AudioMode audioMode,
-               bool withSonification = true, 
+               bool withSonification = true,
                bool withSpectrogram = true);
     virtual ~MainWindow();
 
@@ -85,7 +86,12 @@ protected slots:
     virtual void editDisplayExtents();
 
     virtual void analyseNow();
+
+    virtual void analyseDuringRecording();
+    virtual void analyseDuringRecordingRunner();
     virtual void resetAnalyseOptions();
+    virtual void recordAnalysisToggled();
+
     virtual void autoAnalysisToggled();
     virtual void precisionAnalysisToggled();
     virtual void lowampAnalysisToggled();
@@ -162,7 +168,7 @@ protected slots:
     virtual void whatsNew();
 
     virtual void betaReleaseWarning();
-    
+
     virtual void newerVersionAvailable(QString);
 
     virtual void selectionChangedByUser();
@@ -203,11 +209,12 @@ protected:
     bool           m_intelligentActionOn; // GF: !!! temporary
 
     QAction       *m_autoAnalyse;
+    QAction       *m_analyseDuringRecord;
     QAction       *m_precise;
     QAction       *m_lowamp;
     QAction       *m_onset;
     QAction       *m_prune;
-        
+
     QAction       *m_showAudio;
     QAction       *m_showSpect;
     QAction       *m_showPitch;
@@ -218,10 +225,13 @@ protected:
     LevelPanToolButton *m_audioLPW;
     LevelPanToolButton *m_pitchLPW;
     LevelPanToolButton *m_notesLPW;
-    
+
     ActivityLog   *m_activityLog;
     KeyReference  *m_keyReference;
     VersionTester *m_versionTester;
+
+    sv_frame_t m_analysedFrames = 0;
+
     QString        m_newerVersionIs;
 
     sv_frame_t m_selectionAnchor;
