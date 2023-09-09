@@ -5,7 +5,7 @@
     An intonation analysis and annotation tool
     Centre for Digital Music, Queen Mary, University of London.
     This file copyright 2006-2012 Chris Cannam and QMUL.
-    
+
     This program is free software; you can redistribute it and/or
     modify it under the terms of the GNU General Public License as
     published by the Free Software Foundation; either version 2 of the
@@ -56,9 +56,11 @@ public:
     // layers; return "" on success or error string on failure
     QString analyseExistingFile();
 
+    QString doAllAnalyses(bool withPitchTrack);
+
     // Discard any layers etc associated with the current document
     void fileClosed();
-		       
+
     void setIntelligentActions(bool);
 
     bool getDisplayFrequencyExtents(double &min, double &max);
@@ -128,7 +130,7 @@ public:
      * group in QSettings.
      */
     static std::map<QString, QVariant> getAnalysisSettings();
-    
+
     /**
      * Analyse the selection and schedule asynchronous adds of
      * candidate layers for the region it contains. Returns "" on
@@ -263,7 +265,7 @@ protected:
     void discardPitchCandidates();
 
     void stackLayers();
-    
+
     // Document::LayerCreationHandler method
     void layersCreated(sv::Document::LayerCreationAsyncHandle,
                        std::vector<sv::Layer *>, std::vector<sv::Layer *>);

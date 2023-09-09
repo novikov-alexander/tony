@@ -5,7 +5,7 @@
     An intonation analysis and annotation tool
     Centre for Digital Music, Queen Mary, University of London.
     This file copyright 2006-2012 Chris Cannam and QMUL.
-    
+
     This program is free software; you can redistribute it and/or
     modify it under the terms of the GNU General Public License as
     published by the Free Software Foundation; either version 2 of the
@@ -102,7 +102,7 @@ using std::endl;
 using namespace sv;
 
 MainWindow::MainWindow(AudioMode audioMode,
-                       bool withSonification, 
+                       bool withSonification,
                        bool withSpectrogram) :
     MainWindowBase(audioMode,
                    MainWindowBase::MIDI_NONE,
@@ -111,7 +111,7 @@ MainWindow::MainWindow(AudioMode audioMode,
     m_overview(0),
     m_mainMenusCreated(false),
     m_playbackMenu(0),
-    m_recentFilesMenu(0), 
+    m_recentFilesMenu(0),
     m_rightButtonMenu(0),
     m_rightButtonPlaybackMenu(0),
     m_deleteSelectedAction(0),
@@ -186,13 +186,13 @@ MainWindow::MainWindow(AudioMode audioMode,
     m_viewManager->setOverlayMode(ViewManager::GlobalOverlays);
 
     connect(m_viewManager, SIGNAL(selectionChangedByUser()),
-	    this, SLOT(selectionChangedByUser()));
+            this, SLOT(selectionChangedByUser()));
 
     QFrame *frame = new QFrame;
     setCentralWidget(frame);
 
     QGridLayout *layout = new QGridLayout;
-    
+
     QScrollArea *scroll = new QScrollArea(frame);
     scroll->setWidgetResizable(true);
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -230,7 +230,7 @@ MainWindow::MainWindow(AudioMode audioMode,
     } else {
         m_panLayer->setBaseColour
             (ColourDatabase::getInstance()->getColourIndex(tr("Blue")));
-    }        
+    }
 
     m_fader = new Fader(frame, false);
     connect(m_fader, SIGNAL(mouseEntered()), this, SLOT(mouseEnteredWidget()));
@@ -311,7 +311,7 @@ MainWindow::MainWindow(AudioMode audioMode,
     m_activityLog->hide();
 
     setAudioRecordMode(RecordReplaceSession);
-    
+
     newSession();
 
     settings.beginGroup("MainWindow");
@@ -350,7 +350,7 @@ MainWindow::setupMenus()
         // workaround, to remove the appmenu-qt5 package, but that is
         // awkward and the problem is so severe that it merits disabling
         // the system menubar integration altogether. Like this:
-	menuBar()->setNativeMenuBar(false);
+        menuBar()->setNativeMenuBar(false);
 #endif
 
         m_rightButtonMenu = new QMenu();
@@ -417,7 +417,7 @@ MainWindow::setupFileMenu()
     m_keyReference->registerShortcut(action);
     menu->addAction(action);
     toolbar->addAction(action);
-	
+
     icon = il.load("filesaveas");
     action = new QAction(icon, tr("Save Session &As..."), this);
     action->setShortcut(tr("Ctrl+Shift+S"));
@@ -455,7 +455,7 @@ MainWindow::setupFileMenu()
     menu->addAction(action);
 
     menu->addSeparator();
-    
+
     action = new QAction(tr("Browse Recorded Audio"), this);
     action->setStatusTip(tr("Open the Recorded Audio folder in the system file browser"));
     connect(action, SIGNAL(triggered()), this, SLOT(browseRecordedAudio()));
@@ -484,17 +484,17 @@ MainWindow::setupEditMenu()
     m_keyReference->setCategory
         (tr("Selection Strip Mouse Actions"));
     m_keyReference->registerShortcut
-        (tr("Jump"), tr("Left"), 
+        (tr("Jump"), tr("Left"),
          tr("Click left button to move the playback position to a time"));
     m_keyReference->registerShortcut
-        (tr("Select"), tr("Left"), 
+        (tr("Select"), tr("Left"),
          tr("Click left button and drag to select a region of time"));
     m_keyReference->registerShortcut
-        (tr("Select Note Duration"), tr("Double-Click Left"), 
+        (tr("Select Note Duration"), tr("Double-Click Left"),
          tr("Double-click left button to select the region of time corresponding to a note"));
 
     QToolBar *toolbar = addToolBar(tr("Tools Toolbar"));
-    
+
     CommandHistory::getInstance()->registerToolbar(toolbar);
 
     QActionGroup *group = new QActionGroup(this);
@@ -517,18 +517,18 @@ MainWindow::setupEditMenu()
     m_keyReference->setCategory
         (tr("Navigate Tool Mouse Actions"));
     m_keyReference->registerShortcut
-        (tr("Navigate"), tr("Left"), 
+        (tr("Navigate"), tr("Left"),
          tr("Click left button and drag to move around"));
     m_keyReference->registerShortcut
-        (tr("Re-Analyse Area"), tr("Shift+Left"), 
+        (tr("Re-Analyse Area"), tr("Shift+Left"),
          tr("Shift-click left button and drag to define a specific pitch and time range to re-analyse"));
     m_keyReference->registerShortcut
-        (tr("Edit"), tr("Double-Click Left"), 
+        (tr("Edit"), tr("Double-Click Left"),
          tr("Double-click left button on an item to edit it"));
 
     m_keyReference->setCategory(tr("Tool Selection"));
     action = toolbar->addAction(il.load("move"),
-				tr("Edit"));
+                                tr("Edit"));
     action->setCheckable(true);
     action->setShortcut(tr("2"));
     action->setStatusTip(tr("Edit with Note Intelligence"));
@@ -540,16 +540,16 @@ MainWindow::setupEditMenu()
     m_keyReference->setCategory
         (tr("Note Edit Tool Mouse Actions"));
     m_keyReference->registerShortcut
-        (tr("Adjust Pitch"), tr("Left"), 
+        (tr("Adjust Pitch"), tr("Left"),
         tr("Click left button on the main part of a note and drag to move it up or down"));
     m_keyReference->registerShortcut
-        (tr("Split"), tr("Left"), 
+        (tr("Split"), tr("Left"),
         tr("Click left button on the bottom edge of a note to split it at the click point"));
     m_keyReference->registerShortcut
-        (tr("Resize"), tr("Left"), 
+        (tr("Resize"), tr("Left"),
         tr("Click left button on the left or right edge of a note and drag to change the time or duration of the note"));
     m_keyReference->registerShortcut
-        (tr("Erase"), tr("Shift+Left"), 
+        (tr("Erase"), tr("Shift+Left"),
         tr("Shift-click left button on a note to remove it"));
 
 
@@ -557,7 +557,7 @@ MainWindow::setupEditMenu()
 
     m_keyReference->setCategory(tr("Tool Selection"));
     action = toolbar->addAction(il.load("notes"),
-				tr("Free Edit"));
+                                tr("Free Edit"));
     action->setCheckable(true);
     action->setShortcut(tr("3"));
     action->setStatusTip(tr("Free Edit"));
@@ -567,7 +567,7 @@ MainWindow::setupEditMenu()
 */
 
     menu->addSeparator();
-    
+
     m_keyReference->setCategory(tr("Selection"));
 
     action = new QAction(tr("Select &All"), this);
@@ -593,9 +593,9 @@ MainWindow::setupEditMenu()
 
     menu->addSeparator();
     m_rightButtonMenu->addSeparator();
-    
+
     m_keyReference->setCategory(tr("Pitch Track"));
-    
+
     action = new QAction(tr("Choose Higher Pitch"), this);
     action->setShortcut(tr("Ctrl+Up"));
     action->setStatusTip(tr("Move pitches up an octave, or to the next higher pitch candidate"));
@@ -604,7 +604,7 @@ MainWindow::setupEditMenu()
     connect(this, SIGNAL(canClearSelection(bool)), action, SLOT(setEnabled(bool)));
     menu->addAction(action);
     m_rightButtonMenu->addAction(action);
-    
+
     action = new QAction(tr("Choose Lower Pitch"), this);
     action->setShortcut(tr("Ctrl+Down"));
     action->setStatusTip(tr("Move pitches down an octave, or to the next lower pitch candidate"));
@@ -622,7 +622,7 @@ MainWindow::setupEditMenu()
     connect(this, SIGNAL(canClearSelection(bool)), m_showCandidatesAction, SLOT(setEnabled(bool)));
     menu->addAction(m_showCandidatesAction);
     m_rightButtonMenu->addAction(m_showCandidatesAction);
-    
+
     action = new QAction(tr("Remove Pitches"), this);
     action->setShortcut(tr("Ctrl+Backspace"));
     action->setStatusTip(tr("Remove all pitch estimates within the selected region, making it unvoiced"));
@@ -634,7 +634,7 @@ MainWindow::setupEditMenu()
 
     menu->addSeparator();
     m_rightButtonMenu->addSeparator();
-    
+
     m_keyReference->setCategory(tr("Note Track"));
 
     action = new QAction(tr("Split Note"), this);
@@ -663,7 +663,7 @@ MainWindow::setupEditMenu()
     connect(this, SIGNAL(canSnapNotes(bool)), action, SLOT(setEnabled(bool)));
     menu->addAction(action);
     m_rightButtonMenu->addAction(action);
-    
+
     action = new QAction(tr("Form Note from Selection"), this);
     action->setShortcut(tr("="));
     action->setStatusTip(tr("Form a note spanning the selected region, splitting any existing notes at its boundaries"));
@@ -702,7 +702,7 @@ MainWindow::setupViewMenu()
     connect(this, SIGNAL(canScroll(bool)), action, SLOT(setEnabled(bool)));
     m_keyReference->registerShortcut(action);
     menu->addAction(action);
-    
+
     action = new QAction(tr("Peek &Right"), this);
     action->setShortcut(tr("Alt+Right"));
     action->setStatusTip(tr("Scroll the current pane to the right without changing the play position"));
@@ -723,7 +723,7 @@ MainWindow::setupViewMenu()
     connect(this, SIGNAL(canZoom(bool)), action, SLOT(setEnabled(bool)));
     m_keyReference->registerShortcut(action);
     menu->addAction(action);
-    
+
     action = new QAction(il.load("zoom-out"),
                          tr("Zoom &Out"), this);
     action->setShortcut(tr("Down"));
@@ -732,7 +732,7 @@ MainWindow::setupViewMenu()
     connect(this, SIGNAL(canZoom(bool)), action, SLOT(setEnabled(bool)));
     m_keyReference->registerShortcut(action);
     menu->addAction(action);
-    
+
     action = new QAction(tr("Restore &Default Zoom"), this);
     action->setStatusTip(tr("Restore the zoom level to the default"));
     connect(action, SIGNAL(triggered()), this, SLOT(zoomDefault()));
@@ -749,7 +749,7 @@ MainWindow::setupViewMenu()
     menu->addAction(action);
 
     menu->addSeparator();
-    
+
     action = new QAction(tr("Set Displayed Fre&quency Range..."), this);
     action->setStatusTip(tr("Set the minimum and maximum frequencies in the visible display"));
     connect(action, SIGNAL(triggered()), this, SLOT(editDisplayExtents()));
@@ -767,6 +767,12 @@ MainWindow::setupAnalysisMenu()
 
     QMenu *menu = menuBar()->addMenu(tr("&Analysis"));
     menu->setTearOffEnabled(true);
+
+    m_analyseDuringRecord = new QAction(tr("&Analyse during recording"), this);
+    m_analyseDuringRecord->setStatusTip(tr("Automatically trigger analysis during recording."));
+    m_analyseDuringRecord->setCheckable(true);
+    connect(m_analyseDuringRecord, SIGNAL(triggered()), this, SLOT(recordAnalysisToggled()));
+    menu->addAction(m_analyseDuringRecord);
 
     m_autoAnalyse = new QAction(tr("Auto-Analyse &New Audio"), this);
     m_autoAnalyse->setStatusTip(tr("Automatically trigger analysis upon opening of a new audio file."));
@@ -823,7 +829,7 @@ MainWindow::resetAnalyseOptions()
     settings.beginGroup("Analyser");
 
     settings.setValue("auto-analysis", true);
-    
+
     auto keyMap = Analyser::getAnalysisSettings();
     for (auto p: keyMap) {
         settings.setValue(p.first, p.second);
@@ -850,7 +856,7 @@ MainWindow::updateAnalyseStates()
     };
 
     auto keyMap = Analyser::getAnalysisSettings();
-    
+
     for (auto p: actions) {
         auto ki = keyMap.find(p.first);
         if (ki != keyMap.end()) {
@@ -862,6 +868,23 @@ MainWindow::updateAnalyseStates()
     }
 
     settings.endGroup();
+}
+
+void
+MainWindow::recordAnalysisToggled()
+{
+  QAction *a = qobject_cast<QAction *>(sender());
+  if (!a) return;
+
+  bool set = a->isChecked();
+
+  QSettings settings;
+  settings.beginGroup("Analyser");
+  settings.setValue("record-analysis", set);
+  settings.endGroup();
+
+  // make result visible explicitly, in case e.g. we just set the wrong key
+  updateAnalyseStates();
 }
 
 void
@@ -962,7 +985,7 @@ MainWindow::setupHelpMenu()
 {
     QMenu *menu = menuBar()->addMenu(tr("&Help"));
     menu->setTearOffEnabled(true);
-    
+
     m_keyReference->setCategory(tr("Help"));
 
     IconLoader il;
@@ -971,9 +994,9 @@ MainWindow::setupHelpMenu()
     QAction *action;
 
     action = new QAction(il.load("help"),
-                         tr("&Help Reference"), this); 
+                         tr("&Help Reference"), this);
     action->setShortcut(tr("F1"));
-    action->setStatusTip(tr("Open the %1 reference manual").arg(name)); 
+    action->setStatusTip(tr("Open the %1 reference manual").arg(name));
     connect(action, SIGNAL(triggered()), this, SLOT(help()));
     m_keyReference->registerShortcut(action);
     menu->addAction(action);
@@ -984,14 +1007,14 @@ MainWindow::setupHelpMenu()
     connect(action, SIGNAL(triggered()), this, SLOT(keyReference()));
     m_keyReference->registerShortcut(action);
     menu->addAction(action);
-    
-    action = new QAction(tr("What's &New In This Release?"), this); 
-    action->setStatusTip(tr("List the changes in this release (and every previous release) of %1").arg(name)); 
+
+    action = new QAction(tr("What's &New In This Release?"), this);
+    action->setStatusTip(tr("List the changes in this release (and every previous release) of %1").arg(name));
     connect(action, SIGNAL(triggered()), this, SLOT(whatsNew()));
     menu->addAction(action);
-    
-    action = new QAction(tr("&About %1").arg(name), this); 
-    action->setStatusTip(tr("Show information about %1").arg(name)); 
+
+    action = new QAction(tr("&About %1").arg(name), this);
+    action->setStatusTip(tr("Show information about %1").arg(name));
     connect(action, SIGNAL(triggered()), this, SLOT(about()));
     menu->addAction(action);
 }
@@ -1076,10 +1099,14 @@ MainWindow::setupToolbars()
     recordAction->setShortcut(tr("Ctrl+Space"));
     recordAction->setStatusTip(tr("Record a new audio file"));
     connect(recordAction, SIGNAL(triggered()), this, SLOT(record()));
+
+    connect(recordAction, SIGNAL(triggered()),
+          this, SLOT(analyseDuringRecordingRunner()));
+
     connect(m_recordTarget, SIGNAL(recordStatusChanged(bool)),
-	    recordAction, SLOT(setChecked(bool)));
+            recordAction, SLOT(setChecked(bool)));
     connect(m_recordTarget, SIGNAL(recordCompleted()),
-	    this, SLOT(analyseNow()));
+            this, SLOT(analyseNow()));
     connect(this, SIGNAL(canRecord(bool)),
             recordAction, SLOT(setEnabled(bool)));
 
@@ -1112,7 +1139,7 @@ MainWindow::setupToolbars()
     oneLeftAction->setStatusTip(tr("Move cursor to the preceding note (or silence) onset."));
     connect(oneLeftAction, SIGNAL(triggered()), this, SLOT(moveOneNoteLeft()));
     connect(this, SIGNAL(canScroll(bool)), oneLeftAction, SLOT(setEnabled(bool)));
-    
+
     QAction *oneRightAction = new QAction(tr("O&ne Note Right"), this);
     oneRightAction->setShortcut(tr("Ctrl+Right"));
     oneRightAction->setStatusTip(tr("Move cursor to the succeeding note (or silence)."));
@@ -1124,7 +1151,7 @@ MainWindow::setupToolbars()
     selectOneLeftAction->setStatusTip(tr("Select to the preceding note (or silence) onset."));
     connect(selectOneLeftAction, SIGNAL(triggered()), this, SLOT(selectOneNoteLeft()));
     connect(this, SIGNAL(canScroll(bool)), selectOneLeftAction, SLOT(setEnabled(bool)));
-    
+
     QAction *selectOneRightAction = new QAction(tr("S&elect One Note Right"), this);
     selectOneRightAction->setShortcut(tr("Ctrl+Shift+Right"));
     selectOneRightAction->setStatusTip(tr("Select to the succeeding note (or silence)."));
@@ -1186,7 +1213,7 @@ MainWindow::setupToolbars()
     fastAction->setStatusTip(tr("Time-stretch playback to speed it up without changing pitch"));
     connect(fastAction, SIGNAL(triggered()), this, SLOT(speedUpPlayback()));
     connect(this, SIGNAL(canSpeedUpPlayback(bool)), fastAction, SLOT(setEnabled(bool)));
-    
+
     QAction *slowAction = menu->addAction(tr("Slow Down"));
     slowAction->setShortcut(tr("Ctrl+PgDown"));
     slowAction->setStatusTip(tr("Time-stretch playback to slow it down without changing pitch"));
@@ -1234,7 +1261,7 @@ MainWindow::setupToolbars()
     lpwSize = m_viewManager->scalePixelSize(26);
     bigLpwSize = int(lpwSize * 2.8);
 #endif
-    
+
     m_audioLPW->setImageSize(lpwSize);
     m_audioLPW->setBigImageSize(bigLpwSize);
     toolbar->addWidget(m_audioLPW);
@@ -1303,7 +1330,7 @@ MainWindow::setupToolbars()
     Pane::registerShortcuts(*m_keyReference);
 
     updateLayerStatuses();
-    
+
 //    QTimer::singleShot(500, this, SLOT(betaReleaseWarning()));
 }
 
@@ -1340,7 +1367,7 @@ MainWindow::moveByOneNote(bool right, bool doSelect)
 {
     sv_frame_t frame = m_viewManager->getPlaybackFrame();
     cerr << "MainWindow::moveByOneNote startframe: " << frame << endl;
-    
+
     bool isAtSelectionBoundary = false;
     MultiSelection::SelectionList selections = m_viewManager->getSelections();
     if (!selections.empty()) {
@@ -1360,7 +1387,7 @@ MainWindow::moveByOneNote(bool right, bool doSelect)
     //!!! This seems like a strange and inefficient way to do this -
     //!!! there is almost certainly a better way making use of
     //!!! EventSeries api
-    
+
     EventVector points = model->getAllEvents();
     if (points.empty()) return;
 
@@ -1434,24 +1461,24 @@ MainWindow::updateMenuStates()
     if (currentPane) currentLayer = currentPane->getSelectedLayer();
 
     bool haveMainModel =
-	(getMainModel() != 0);
+        (getMainModel() != 0);
     bool havePlayTarget =
-	(m_playTarget != 0 || m_audioIO != 0);
+        (m_playTarget != 0 || m_audioIO != 0);
     bool haveCurrentPane =
         (currentPane != 0);
     bool haveCurrentLayer =
         (haveCurrentPane &&
          (currentLayer != 0));
-    bool haveSelection = 
+    bool haveSelection =
         (m_viewManager &&
          !m_viewManager->getSelections().empty());
-    bool haveCurrentTimeInstantsLayer = 
+    bool haveCurrentTimeInstantsLayer =
         (haveCurrentLayer &&
          qobject_cast<TimeInstantLayer *>(currentLayer));
-    bool haveCurrentTimeValueLayer = 
+    bool haveCurrentTimeValueLayer =
         (haveCurrentLayer &&
          qobject_cast<TimeValueLayer *>(currentLayer));
-    bool pitchCandidatesVisible = 
+    bool pitchCandidatesVisible =
         m_analyser->arePitchCandidatesShown();
 
     emit canChangePlaybackSpeed(true);
@@ -1463,11 +1490,11 @@ MainWindow::updateMenuStates()
         m_analyser->isVisible(Analyser::Audio) &&
         m_analyser->getLayer(Analyser::Audio);
 
-    bool havePitchTrack = 
+    bool havePitchTrack =
         m_analyser->isVisible(Analyser::PitchTrack) &&
         m_analyser->getLayer(Analyser::PitchTrack);
 
-    bool haveNotes = 
+    bool haveNotes =
         m_analyser->isVisible(Analyser::Notes) &&
         m_analyser->getLayer(Analyser::Notes);
 
@@ -1611,7 +1638,7 @@ MainWindow::updateLayerStatuses()
     m_audioLPW->setEnabled(m_analyser->isAudible(Analyser::Audio));
     m_audioLPW->setLevel(m_analyser->getGain(Analyser::Audio));
     m_audioLPW->setPan(m_analyser->getPan(Analyser::Audio));
-    
+
     m_showPitch->setChecked(m_analyser->isVisible(Analyser::PitchTrack));
     m_playPitch->setChecked(m_analyser->isAudible(Analyser::PitchTrack));
     m_pitchLPW->setEnabled(m_analyser->isAudible(Analyser::PitchTrack));
@@ -1633,7 +1660,7 @@ MainWindow::editDisplayExtents()
     double min, max;
     double vmin = 0;
     double vmax = getMainModel()->getSampleRate() /2;
-    
+
     if (!m_analyser->getDisplayFrequencyExtents(min, max)) {
         //!!!
         return;
@@ -1691,7 +1718,7 @@ MainWindow::newSession()
 
     m_viewManager->setGlobalCentreFrame
         (pane->getFrameForX(width() / 2));
-    
+
     connect(pane, SIGNAL(contextHelpChanged(const QString &)),
             this, SLOT(contextHelpChanged(const QString &)));
 
@@ -1730,7 +1757,7 @@ MainWindow::closeSession()
             m_document->removeLayerFromView
                 (pane, pane->getLayer(pane->getLayerCount() - 1));
         }
-        
+
         m_overview->unregisterView(pane);
         m_paneStack->deletePane(pane);
     }
@@ -1739,12 +1766,12 @@ MainWindow::closeSession()
 
         Pane *pane = m_paneStack->getHiddenPane
             (m_paneStack->getHiddenPaneCount() - 1);
-        
+
         while (pane->getLayerCount() > 0) {
             m_document->removeLayerFromView
                 (pane, pane->getLayer(pane->getLayerCount() - 1));
         }
-        
+
         m_overview->unregisterView(pane);
         m_paneStack->deletePane(pane);
     }
@@ -1818,7 +1845,7 @@ MainWindow::openRecentFile()
 {
     QObject *obj = sender();
     QAction *action = qobject_cast<QAction *>(obj);
-    
+
     if (!action) {
         cerr << "WARNING: MainWindow::openRecentFile: sender is not an action"
              << endl;
@@ -1845,19 +1872,19 @@ MainWindow::paneAdded(Pane *pane)
     pane->setPlaybackFollow(PlaybackScrollPage);
     m_paneStack->sizePanesEqually();
     if (m_overview) m_overview->registerView(pane);
-}    
+}
 
 void
 MainWindow::paneHidden(Pane *pane)
 {
-    if (m_overview) m_overview->unregisterView(pane); 
-}    
+    if (m_overview) m_overview->unregisterView(pane);
+}
 
 void
 MainWindow::paneAboutToBeDeleted(Pane *pane)
 {
-    if (m_overview) m_overview->unregisterView(pane); 
-}    
+    if (m_overview) m_overview->unregisterView(pane);
+}
 
 void
 MainWindow::paneDropAccepted(Pane *pane, QStringList uriList)
@@ -1884,8 +1911,8 @@ MainWindow::paneDropAccepted(Pane *pane, QString text)
     if (pane) m_paneStack->setCurrentPane(pane);
 
     QUrl testUrl(text);
-    if (testUrl.scheme() == "file" || 
-        testUrl.scheme() == "http" || 
+    if (testUrl.scheme() == "file" ||
+        testUrl.scheme() == "http" ||
         testUrl.scheme() == "ftp") {
         QStringList list;
         list.push_back(text);
@@ -1950,7 +1977,7 @@ MainWindow::commitData(bool mayAskUser)
         } else {
             if (!QFileInfo(svDir).isDir()) return false;
         }
-        
+
         // This name doesn't have to be unguessable
 #ifndef _WIN32
         QString fname = QString("tmp-%1-%2.sv")
@@ -1979,7 +2006,7 @@ MainWindow::checkSaveModified()
 
     if (!m_documentModified) return true;
 
-    int button = 
+    int button =
         QMessageBox::warning(this,
                              tr("Session modified"),
                              tr("The current session has been modified.\nDo you want to save it?"),
@@ -2009,7 +2036,7 @@ MainWindow::waitForInitialAnalysis()
     // initial analysis is happening, because then we end up with an
     // incomplete session on reload. There are certainly theoretically
     // better ways to handle this...
-    
+
     QSettings settings;
     settings.beginGroup("Analyser");
     bool autoAnalyse = settings.value("auto-analysis", true).toBool();
@@ -2029,7 +2056,7 @@ MainWindow::waitForInitialAnalysis()
                    QMessageBox::Cancel,
                    this);
 
-    connect(m_analyser, SIGNAL(initialAnalysisCompleted()), 
+    connect(m_analyser, SIGNAL(initialAnalysisCompleted()),
             &mb, SLOT(accept()));
 
     if (mb.exec() == QDialog::Accepted) {
@@ -2164,14 +2191,14 @@ MainWindow::exportToSVL(QString path, Layer *layer)
             << "<!DOCTYPE sonic-visualiser>\n"
             << "<sv>\n"
             << "  <data>\n";
-        
+
         model->toXml(out, "    ");
-        
+
         out << "  </data>\n"
             << "  <display>\n";
-        
+
         layer->toXml(out, "    ");
-        
+
         out << "  </display>\n"
             << "</sv>\n";
 
@@ -2206,10 +2233,10 @@ MainWindow::importPitchLayer(FileSource source)
     source.waitForData();
 
     if (!waitForInitialAnalysis()) return FileOpenCancelled;
-    
+
     QString path = source.getLocalFilename();
 
-    RDFImporter::RDFDocumentType rdfType = 
+    RDFImporter::RDFDocumentType rdfType =
         RDFImporter::identifyDocumentType(QUrl::fromLocalFile(path).toString());
 
     if (rdfType != RDFImporter::NotRDF) {
@@ -2221,12 +2248,12 @@ MainWindow::importPitchLayer(FileSource source)
                (source.getExtension().toLower() == "xml" &&
                 (SVFileReader::identifyXmlFile(source.getLocalFilename())
                  == SVFileReader::SVLayerFile))) {
-        
+
         //!!!
         return FileOpenFailed;
 
     } else {
-        
+
         try {
 
             CSVFormat format(path);
@@ -2246,7 +2273,7 @@ MainWindow::importPitchLayer(FileSource source)
 
                 ModelId modelId = ModelById::add
                     (std::shared_ptr<Model>(model));
-                
+
                 CommandHistory::getInstance()->startCompoundOperation
                     (tr("Import Pitch Track"), true);
 
@@ -2272,7 +2299,7 @@ MainWindow::importPitchLayer(FileSource source)
             }
         }
     }
-    
+
     return FileOpenFailed;
 }
 
@@ -2292,7 +2319,7 @@ MainWindow::exportPitchLayer()
     if (path == "") return;
 
     if (!waitForInitialAnalysis()) return;
-    
+
     if (QFileInfo(path).suffix() == "") path += ".svl";
 
     QString suffix = QFileInfo(path).suffix().toLower();
@@ -2314,7 +2341,7 @@ MainWindow::exportPitchLayer()
     } else {
 
         DataExportOptions options = DataExportFillGaps;
-        
+
         CSVFileWriter writer(path, model.get(),
                              ((suffix == "csv") ? "," : "\t"),
                              options);
@@ -2358,7 +2385,7 @@ MainWindow::exportNoteLayer()
         error = exportToSVL(path, layer);
 
     } else if (suffix == "mid" || suffix == "midi") {
-     
+
         MIDIFileWriter writer(path, model.get(), model->getSampleRate());
         writer.write();
         if (!writer.isOK()) {
@@ -2376,7 +2403,7 @@ MainWindow::exportNoteLayer()
     } else {
 
         DataExportOptions options = DataExportOmitLevel;
-        
+
         CSVFileWriter writer(path, model.get(),
                              ((suffix == "csv") ? "," : "\t"),
                              options);
@@ -2411,7 +2438,7 @@ MainWindow::doubleClickSelectInvoked(sv_frame_t frame)
 {
     sv_frame_t f0, f1;
     m_analyser->getEnclosingSelectionScope(frame, f0, f1);
-    
+
     cerr << "MainWindow::doubleClickSelectInvoked(" << frame << "): [" << f0 << "," << f1 << "]" << endl;
 
     Selection sel(f0, f1);
@@ -2496,11 +2523,11 @@ MainWindow::regionOutlined(QRect r)
 
     sv_frame_t f0 = pane->getFrameForX(r.x());
     sv_frame_t f1 = pane->getFrameForX(r.x() + r.width());
-    
+
     double v0 = spectrogram->getFrequencyForY(pane, r.y() + r.height());
     double v1 = spectrogram->getFrequencyForY(pane, r.y());
 
-    cerr << "MainWindow::regionOutlined: frame " << f0 << " -> " << f1 
+    cerr << "MainWindow::regionOutlined: frame " << f0 << " -> " << f1
          << ", frequency " << v0 << " -> " << v1 << endl;
 
     m_pendingConstraint = Analyser::FrequencyRange(v0, v1);
@@ -2589,7 +2616,7 @@ MainWindow::switchPitchDown()
                 (tr("Choose Lower Pitch Candidate"), true);
 
             MultiSelection::SelectionList selections = m_viewManager->getSelections();
-            
+
             for (MultiSelection::SelectionList::iterator k = selections.begin();
                  k != selections.end(); ++k) {
                 m_analyser->switchPitchCandidate(*k, false);
@@ -2613,12 +2640,12 @@ MainWindow::snapNotesToPitches()
 
         CommandHistory::getInstance()->startCompoundOperation
             (tr("Snap Notes to Pitches"), true);
-                
+
         for (MultiSelection::SelectionList::iterator k = selections.begin();
              k != selections.end(); ++k) {
             auxSnapNotes(*k);
         }
-        
+
         CommandHistory::getInstance()->endCompoundOperation();
     }
 }
@@ -2632,7 +2659,7 @@ MainWindow::auxSnapNotes(Selection s)
     if (!layer) return;
 
     layer->snapSelectedNotesToPitchTrack(m_analyser->getPane(), s);
-}    
+}
 
 void
 MainWindow::splitNote()
@@ -2657,12 +2684,12 @@ MainWindow::mergeNotes()
 
         CommandHistory::getInstance()->startCompoundOperation
             (tr("Merge Notes"), true);
-                
+
         for (MultiSelection::SelectionList::iterator k = selections.begin();
              k != selections.end(); ++k) {
             layer->mergeNotes(m_analyser->getPane(), *k, true);
         }
-        
+
         CommandHistory::getInstance()->endCompoundOperation();
     }
 }
@@ -2680,12 +2707,12 @@ MainWindow::deleteNotes()
 
         CommandHistory::getInstance()->startCompoundOperation
             (tr("Delete Notes"), true);
-                
+
         for (MultiSelection::SelectionList::iterator k = selections.begin();
              k != selections.end(); ++k) {
             layer->deleteSelectionInclusive(*k);
         }
-        
+
         CommandHistory::getInstance()->endCompoundOperation();
     }
 }
@@ -2703,7 +2730,7 @@ MainWindow::formNoteFromSelection()
     MultiSelection::SelectionList selections = m_viewManager->getSelections();
 
     if (!selections.empty()) {
-    
+
         CommandHistory::getInstance()->startCompoundOperation
             (tr("Form Note from Selection"), true);
 
@@ -2717,7 +2744,7 @@ MainWindow::formNoteFromSelection()
             // existing pitch track if possible. This way we should
             // handle all the possible cases of existing notes that
             // may or may not overlap the start or end times
-            
+
             sv_frame_t start = k->getStartFrame();
             sv_frame_t end = k->getEndFrame();
 
@@ -2728,18 +2755,18 @@ MainWindow::formNoteFromSelection()
             if (!existing.empty()) {
                 defaultPitch = int(roundf(existing.begin()->getValue()));
             }
-            
+
             layer->splitNotesAt(pane, start);
             layer->splitNotesAt(pane, end);
             layer->deleteSelection(*k);
-            
+
             layer->addNoteOn(start, defaultPitch, 100);
             layer->addNoteOff(end, defaultPitch);
-            
+
             layer->mergeNotes(pane, *k, false);
         }
 
-        CommandHistory::getInstance()->endCompoundOperation();     
+        CommandHistory::getInstance()->endCompoundOperation();
     }
 }
 
@@ -2758,7 +2785,7 @@ MainWindow::playSpeedChanged(int position)
 
     char pcbuf[30];
     char facbuf[30];
-    
+
     if (position == centre) {
         contextHelpChanged(tr("Playback speed: Normal"));
     } else if (position < centre) {
@@ -2802,7 +2829,7 @@ MainWindow::playMonoToggled()
 
     playSpeedChanged(m_playSpeed->value());
     // TODO: pitch gain?
-}    
+}
 
 void
 MainWindow::speedUpPlayback()
@@ -2841,7 +2868,7 @@ MainWindow::audioGainChanged(float gain)
         m_analyser->setGain(Analyser::Audio, gain);
     }
     updateMenuStates();
-} 
+}
 
 void
 MainWindow::pitchGainChanged(float gain)
@@ -2856,7 +2883,7 @@ MainWindow::pitchGainChanged(float gain)
         m_analyser->setGain(Analyser::PitchTrack, gain);
     }
     updateMenuStates();
-} 
+}
 
 void
 MainWindow::notesGainChanged(float gain)
@@ -2871,7 +2898,7 @@ MainWindow::notesGainChanged(float gain)
         m_analyser->setGain(Analyser::Notes, gain);
     }
     updateMenuStates();
-} 
+}
 
 void
 MainWindow::audioPanChanged(float pan)
@@ -2879,7 +2906,7 @@ MainWindow::audioPanChanged(float pan)
     contextHelpChanged(tr("Audio Pan: %1").arg(pan));
     m_analyser->setPan(Analyser::Audio, pan);
     updateMenuStates();
-} 
+}
 
 void
 MainWindow::pitchPanChanged(float pan)
@@ -2887,7 +2914,7 @@ MainWindow::pitchPanChanged(float pan)
     contextHelpChanged(tr("Pitch Pan: %1").arg(pan));
     m_analyser->setPan(Analyser::PitchTrack, pan);
     updateMenuStates();
-} 
+}
 
 void
 MainWindow::notesPanChanged(float pan)
@@ -2895,7 +2922,7 @@ MainWindow::notesPanChanged(float pan)
     contextHelpChanged(tr("Notes Pan: %1").arg(pan));
     m_analyser->setPan(Analyser::Notes, pan);
     updateMenuStates();
-} 
+}
 
 void
 MainWindow::updateVisibleRangeDisplay(Pane *p) const
@@ -2944,7 +2971,7 @@ MainWindow::updateVisibleRangeDisplay(Pane *p) const
         m_myStatusMessage = tr("Visible: %1 to %2 (duration %3)")
             .arg(startStr).arg(endStr).arg(durationStr);
     }
-    
+
     getStatusLabel()->setText(m_myStatusMessage);
 }
 
@@ -3046,6 +3073,44 @@ MainWindow::analyseNow()
 }
 
 void
+MainWindow::analyseDuringRecordingRunner()
+{
+  // analyseNow();
+  // analyseDuringRecording();
+  // QTimer::singleShot(5000, this, SLOT(analyseNow()));
+}
+
+void
+MainWindow::analyseDuringRecording()
+{
+  QSettings settings;
+  settings.beginGroup("Analyser");
+  bool recordAnalyse = settings.value("record-analysis", true).toBool();
+  settings.endGroup();
+  if (recordAnalyse && this->m_recordTarget->isRecording())
+  {
+    int duration_ms = 1000;
+    auto start_position = this->m_analysedFrames;
+    auto end_position = m_recordTarget->getRecordDuration();
+    auto selection = Selection(start_position, end_position);
+    this->m_analysedFrames = end_position;
+    (tr("Analyse Audio"), true);
+    m_analyser->showPitchCandidates(true);
+    m_analyser->reAnalyseSelection(
+          selection,
+          Analyser::FrequencyRange());
+    updateAnalyseStates();
+    // TODO (alnovi): run analysis not by time but in the process of buffer filling
+    QTimer::singleShot(duration_ms, this, SLOT(analyseDuringRecording()));
+  }
+  /*
+    TODO (alnovi): else {
+      analyse tail when recording is stopped
+    }
+  */
+}
+
+void
 MainWindow::analyseNewMainModel()
 {
     auto model = getMainModel();
@@ -3053,7 +3118,7 @@ MainWindow::analyseNewMainModel()
     SVDEBUG << "MainWindow::analyseNewMainModel: main model is " << model << endl;
 
     SVDEBUG << "(document is " << m_document << ", it says main model is " << m_document->getMainModel() << ")" << endl;
-    
+
     if (!model) {
         cerr << "no main model!" << endl;
         return;
@@ -3117,7 +3182,7 @@ MainWindow::analyseNewMainModel()
         m_analyser->setAudible(Analyser::PitchTrack, false);
         m_analyser->setAudible(Analyser::Notes, false);
     }
-   
+
     updateLayerStatuses();
     documentRestored();
 }
@@ -3265,16 +3330,16 @@ MainWindow::whatsNew()
 
     QDialog *d = new QDialog(this);
     d->setWindowTitle(tr("What's New"));
-        
+
     QGridLayout *layout = new QGridLayout;
     d->setLayout(layout);
 
     int row = 0;
-    
+
     QLabel *iconLabel = new QLabel;
     iconLabel->setPixmap(QApplication::windowIcon().pixmap(64, 64));
     layout->addWidget(iconLabel, row, 0);
-    
+
     layout->addWidget
         (new QLabel(tr("<h3>What's New in %1</h3>")
                     .arg(QApplication::applicationName())),
@@ -3287,7 +3352,7 @@ MainWindow::whatsNew()
     if (m_newerVersionIs != "") {
         layout->addWidget(new QLabel(tr("<b>Note:</b> A newer version of %1 is available.<br>(Version %2 is available; you are using version %3)").arg(QApplication::applicationName()).arg(m_newerVersionIs).arg(TONY_VERSION)), row++, 1, 1, 2);
     }
-    
+
     QDialogButtonBox *bb = new QDialogButtonBox(QDialogButtonBox::Ok);
     layout->addWidget(bb, row++, 0, 1, 3);
     connect(bb, SIGNAL(accepted()), d, SLOT(accept()));
@@ -3316,7 +3381,7 @@ MainWindow::whatsNew()
 
     d->setMinimumSize(m_viewManager->scalePixelSize(520),
                       m_viewManager->scalePixelSize(450));
-    
+
     d->exec();
 
     delete d;
@@ -3360,7 +3425,7 @@ MainWindow::about()
     aboutText += tr("<p>Using Qt framework version %1.</p>")
         .arg(QT_VERSION_STR);
 
-    aboutText += 
+    aboutText +=
         "<p>Copyright &copy; 2005&ndash;2019 Chris Cannam, Queen Mary University of London, and the Tony project authors: Matthias Mauch, George Fazekas, Justin Salamon, and Rachel Bittner.</p>"
         "<p>pYIN analysis plugin written by Matthias Mauch.</p>"
         "<p>This program is free software; you can redistribute it and/or "
@@ -3368,18 +3433,18 @@ MainWindow::about()
         "published by the Free Software Foundation; either version 2 of the "
         "License, or (at your option) any later version.<br>See the file "
         "COPYING included with this distribution for more information.</p>";
-    
+
     // use our own dialog so we can influence the size
 
     QDialog *d = new QDialog(this);
 
     d->setWindowTitle(tr("About %1").arg(QApplication::applicationName()));
-        
+
     QGridLayout *layout = new QGridLayout;
     d->setLayout(layout);
 
     int row = 0;
-    
+
     QLabel *iconLabel = new QLabel;
     iconLabel->setPixmap(QApplication::windowIcon().pixmap(64, 64));
     layout->addWidget(iconLabel, row, 0, Qt::AlignTop);
@@ -3402,7 +3467,7 @@ MainWindow::about()
 
     d->setMinimumSize(m_viewManager->scalePixelSize(420),
                       m_viewManager->scalePixelSize(200));
-    
+
     d->exec();
 
     delete d;
@@ -3418,7 +3483,7 @@ void
 MainWindow::newerVersionAvailable(QString version)
 {
     m_newerVersionIs = version;
-    
+
     //!!! nicer URL would be nicer
     QSettings settings;
     settings.beginGroup("NewerVersionWarning");
@@ -3442,9 +3507,9 @@ MainWindow::ffwd()
 
     sv_samplerate_t sr = getMainModel()->getSampleRate();
 
-    // The step is supposed to scale and be as wide as a step of 
+    // The step is supposed to scale and be as wide as a step of
     // m_defaultFfwdRwdStep seconds at zoom level 720 and sr = 44100
-    
+
     ZoomLevel zoom = m_viewManager->getGlobalZoom();
     double framesPerPixel = 1.0;
     if (zoom.zone == ZoomLevel::FramesPerPixel) {
@@ -3455,20 +3520,20 @@ MainWindow::ffwd()
     double defaultFramesPerPixel = (720 * 44100) / sr;
     double scaler = framesPerPixel / defaultFramesPerPixel;
     RealTime step = m_defaultFfwdRwdStep * scaler;
-    
+
     frame = RealTime::realTime2Frame
         (RealTime::frame2RealTime(frame, sr) + step, sr);
 
     if (frame > getMainModel()->getEndFrame()) {
         frame = getMainModel()->getEndFrame();
     }
-       
+
     if (frame < 0) frame = 0;
 
     if (m_viewManager->getPlaySelectionMode()) {
         frame = m_viewManager->constrainFrameToSelection(frame);
     }
-    
+
     m_viewManager->setPlaybackFrame(frame);
 
     if (frame == getMainModel()->getEndFrame() &&
@@ -3489,7 +3554,7 @@ MainWindow::rewind()
 
     sv_samplerate_t sr = getMainModel()->getSampleRate();
 
-    // The step is supposed to scale and be as wide as a step of 
+    // The step is supposed to scale and be as wide as a step of
     // m_defaultFfwdRwdStep seconds at zoom level 720 and sr = 44100
 
     ZoomLevel zoom = m_viewManager->getGlobalZoom();
@@ -3505,7 +3570,7 @@ MainWindow::rewind()
 
     frame = RealTime::realTime2Frame
         (RealTime::frame2RealTime(frame, sr) - step, sr);
-    
+
     if (frame < getMainModel()->getStartFrame()) {
         frame = getMainModel()->getStartFrame();
     }
