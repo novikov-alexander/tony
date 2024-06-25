@@ -11,30 +11,39 @@
     },
     "libraries": {
         "vamp-plugin-sdk": {
-            "vcs": "hg",
-            "service": "soundsoftware"
+            "vcs": "git",
+            "service": "github",
+            "owner": "vamp-plugins"
         },
         "svcore": {
-            "vcs": "hg",
-	    "service": "soundsoftware"
+            "vcs": "git",
+            "service": "github",
+            "owner": "sonic-visualiser",
+            "branch": "default"
         },
         "svgui": {
-            "vcs": "hg",
-	    "service": "soundsoftware"
+            "vcs": "git",
+            "service": "github",
+            "owner": "sonic-visualiser",
+            "branch": "default"
         },
         "svapp": {
-            "vcs": "hg",
-	    "service": "soundsoftware"
+            "vcs": "git",
+            "service": "github",
+            "owner": "sonic-visualiser",
+            "branch": "default"
         },
         "checker": {
-            "vcs": "hg",
-	    "service": "soundsoftware",
-	    "repository": "vamp-plugin-load-checker"
+            "vcs": "git",
+            "service": "github",
+            "owner": "sonic-visualiser",
+            "repository": "vamp-plugin-load-checker",
+            "branch": "default"
         },
         "piper-vamp-cpp": {
             "vcs": "git",
-	    "service": "github",
-	    "owner": "piper-audio"
+            "service": "github",
+            "owner": "piper-audio"
         },
         "dataquay": {
             "vcs": "hg",
@@ -72,13 +81,17 @@
             "owner": "breakfastquay"
         },
         "sv-dependency-builds": {
-            "vcs": "hg",
-	    "service": "soundsoftware"
+            "vcs": "git",
+            "service": "github",
+            "owner": "sonic-visualiser",
+            "branch": "default"
         },
         "icons/scalable": {
-            "vcs": "hg",
-	    "service": "soundsoftware",
-	    "repository": "sv-iconset"
+            "vcs": "git",
+            "service": "github",
+            "owner": "sonic-visualiser",
+            "repository": "sv-iconset",
+            "branch": "default"
         },
         "pyin": {
             "vcs": "hg",
