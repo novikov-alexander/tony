@@ -1,0 +1,29 @@
+name: macOS CI
+
+on: [push, pull_request]
+
+jobs:
+  build:
+
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: deps
+      run: brew install smlnj qt6 meson ninja capnp mercurial
+    - name: repoint
+      run: PATH=$PATH:/usr/local/smlnj/bin ./repoint install
+    - name: configure
+      run: PATH=$PATH:/usr/local/opt/qt6/bin meson setup build --buildtype release
+    - name: make
+      run: ninja -C build
+    - name: test
+      run: meson test -C build
+    - name: deploy-app
+      run: |
+        ls -lR /usr/local/opt
+        QTDIR=/usr/local/opt/qt6 ./deploy/macos/deploy.sh "Tony"
+    - name: check
+      run: |
+        otool -L ./"Tony.app/Contents/MacOS/Tony"
+        ./"Tony.app/Contents/MacOS/Tony" --version
