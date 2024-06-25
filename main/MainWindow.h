@@ -13,17 +13,19 @@
     COPYING included with this distribution for more information.
 */
 
-#ifndef _MAIN_WINDOW_H_
-#define _MAIN_WINDOW_H_
+#ifndef TONY_MAIN_WINDOW_H
+#define TONY_MAIN_WINDOW_H
 
 #include "framework/MainWindowBase.h"
 #include "Analyser.h"
 
+namespace sv {
 class VersionTester;
 class ActivityLog;
 class LevelPanToolButton;
+}
 
-class MainWindow : public MainWindowBase
+class MainWindow : public sv::MainWindowBase
 {
     Q_OBJECT
 
@@ -93,15 +95,15 @@ protected slots:
     virtual void pruneAnalysisToggled();
     virtual void updateAnalyseStates();
 
-    virtual void doubleClickSelectInvoked(sv_frame_t);
+    virtual void doubleClickSelectInvoked(sv::sv_frame_t);
     virtual void abandonSelection();
 
-    virtual void paneAdded(Pane *);
-    virtual void paneHidden(Pane *);
-    virtual void paneAboutToBeDeleted(Pane *);
+    virtual void paneAdded(sv::Pane *);
+    virtual void paneHidden(sv::Pane *);
+    virtual void paneAboutToBeDeleted(sv::Pane *);
 
-    virtual void paneDropAccepted(Pane *, QStringList);
-    virtual void paneDropAccepted(Pane *, QString);
+    virtual void paneDropAccepted(sv::Pane *, QStringList);
+    virtual void paneDropAccepted(sv::Pane *, QString);
 
     virtual void playSpeedChanged(int);
     virtual void playSharpenToggled();
@@ -121,7 +123,7 @@ protected slots:
     virtual void pitchPanChanged(float);
     virtual void notesPanChanged(float);
 
-    virtual void sampleRateMismatch(sv_samplerate_t, sv_samplerate_t, bool);
+    virtual void sampleRateMismatch(sv::sv_samplerate_t, sv::sv_samplerate_t, bool);
     virtual void audioOverloadPluginDisabled();
 
     virtual void documentModified();
@@ -132,26 +134,26 @@ protected slots:
     virtual void updateDescriptionLabel();
     virtual void updateLayerStatuses();
 
-    virtual void layerRemoved(Layer *);
-    virtual void layerInAView(Layer *, bool);
+    virtual void layerRemoved(sv::Layer *);
+    virtual void layerInAView(sv::Layer *, bool);
 
-    virtual void mainModelChanged(ModelId);
+    virtual void mainModelChanged(sv::ModelId);
     virtual void mainModelGainChanged(float);
-    virtual void modelAdded(ModelId);
+    virtual void modelAdded(sv::ModelId);
 
     virtual void modelGenerationFailed(QString, QString);
     virtual void modelGenerationWarning(QString, QString);
     virtual void modelRegenerationFailed(QString, QString, QString);
     virtual void modelRegenerationWarning(QString, QString, QString);
-    virtual void alignmentFailed(ModelId, QString);
+    virtual void alignmentFailed(sv::ModelId, QString);
 
-    virtual void paneRightButtonMenuRequested(Pane *, QPoint point);
-    virtual void panePropertiesRightButtonMenuRequested(Pane *, QPoint point);
-    virtual void layerPropertiesRightButtonMenuRequested(Pane *, Layer *, QPoint point);
+    virtual void paneRightButtonMenuRequested(sv::Pane *, QPoint point);
+    virtual void panePropertiesRightButtonMenuRequested(sv::Pane *, QPoint point);
+    virtual void layerPropertiesRightButtonMenuRequested(sv::Pane *, sv::Layer *, QPoint point);
 
     virtual void setupRecentFilesMenu();
 
-    virtual void handleOSCMessage(const OSCMessage &);
+    virtual void handleOSCMessage(const sv::OSCMessage &);
 
     virtual void mouseEnteredWidget();
     virtual void mouseLeftWidget();
@@ -181,12 +183,12 @@ protected slots:
 protected:
     Analyser      *m_analyser;
 
-    Overview      *m_overview;
-    Fader         *m_fader;
-    AudioDial     *m_playSpeed;
+    sv::Overview  *m_overview;
+    sv::Fader     *m_fader;
+    sv::AudioDial *m_playSpeed;
     QPushButton   *m_playSharpen;
     QPushButton   *m_playMono;
-    WaveformLayer *m_panLayer;
+    sv::WaveformLayer *m_panLayer;
 
     bool           m_mainMenusCreated;
     QMenu         *m_playbackMenu;
@@ -215,24 +217,24 @@ protected:
     QAction       *m_playAudio;
     QAction       *m_playPitch;
     QAction       *m_playNotes;
-    LevelPanToolButton *m_audioLPW;
-    LevelPanToolButton *m_pitchLPW;
-    LevelPanToolButton *m_notesLPW;
+    sv::LevelPanToolButton *m_audioLPW;
+    sv::LevelPanToolButton *m_pitchLPW;
+    sv::LevelPanToolButton *m_notesLPW;
     
-    ActivityLog   *m_activityLog;
-    KeyReference  *m_keyReference;
-    VersionTester *m_versionTester;
-    QString        m_newerVersionIs;
+    sv::ActivityLog   *m_activityLog;
+    sv::KeyReference  *m_keyReference;
+    sv::VersionTester *m_versionTester;
+    QString            m_newerVersionIs;
 
-    sv_frame_t m_selectionAnchor;
+    sv::sv_frame_t m_selectionAnchor;
 
     bool m_withSonification;
     bool m_withSpectrogram;
 
     Analyser::FrequencyRange m_pendingConstraint;
 
-    QString exportToSVL(QString path, Layer *layer);
-    FileOpenStatus importPitchLayer(FileSource source);
+    QString exportToSVL(QString path, sv::Layer *layer);
+    FileOpenStatus importPitchLayer(sv::FileSource source);
 
     QString getReleaseText() const;
 
@@ -246,13 +248,13 @@ protected:
 
     virtual void octaveShift(bool up);
 
-    virtual void auxSnapNotes(Selection s);
+    virtual void auxSnapNotes(sv::Selection s);
 
     virtual void closeEvent(QCloseEvent *e);
     bool checkSaveModified();
     bool waitForInitialAnalysis();
 
-    virtual void updateVisibleRangeDisplay(Pane *p) const;
+    virtual void updateVisibleRangeDisplay(sv::Pane *p) const;
     virtual void updatePositionStatusDisplays() const;
 
     void moveByOneNote(bool right, bool doSelect);

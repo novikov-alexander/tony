@@ -87,6 +87,8 @@
 #include <QWidgetAction>
 #include <QTextEdit>
 #include <QDialogButtonBox>
+#include <QActionGroup>
+#include <QRegularExpression>
 
 #include <iostream>
 #include <cstdio>
@@ -94,6 +96,10 @@
 
 using std::vector;
 
+using std::cerr;
+using std::endl;
+
+using namespace sv;
 
 MainWindow::MainWindow(AudioMode audioMode,
                        bool withSonification, 
@@ -1948,7 +1954,7 @@ MainWindow::commitData(bool mayAskUser)
 #ifndef _WIN32
         QString fname = QString("tmp-%1-%2.sv")
             .arg(QDateTime::currentDateTime().toString("yyyyMMddhhmmsszzz"))
-            .arg(QProcess().pid());
+            .arg(QProcess().processId());
 #else
         QString fname = QString("tmp-%1.sv")
             .arg(QDateTime::currentDateTime().toString("yyyyMMddhhmmsszzz"));
@@ -2824,7 +2830,7 @@ MainWindow::restoreNormalPlayback()
 void
 MainWindow::audioGainChanged(float gain)
 {
-    double db = AudioLevel::multiplier_to_dB(gain);
+    double db = AudioLevel::voltage_to_dB(gain);
     cerr << "gain = " << gain << " (" << db << " dB)" << endl;
     contextHelpChanged(tr("Audio Gain: %1 dB").arg(db));
     if (gain == 0.f) {
@@ -2839,7 +2845,7 @@ MainWindow::audioGainChanged(float gain)
 void
 MainWindow::pitchGainChanged(float gain)
 {
-    double db = AudioLevel::multiplier_to_dB(gain);
+    double db = AudioLevel::voltage_to_dB(gain);
     cerr << "gain = " << gain << " (" << db << " dB)" << endl;
     contextHelpChanged(tr("Pitch Gain: %1 dB").arg(db));
     if (gain == 0.f) {
@@ -2854,7 +2860,7 @@ MainWindow::pitchGainChanged(float gain)
 void
 MainWindow::notesGainChanged(float gain)
 {
-    double db = AudioLevel::multiplier_to_dB(gain);
+    double db = AudioLevel::voltage_to_dB(gain);
     cerr << "gain = " << gain << " (" << db << " dB)" << endl;
     contextHelpChanged(tr("Notes Gain: %1 dB").arg(db));
     if (gain == 0.f) {
@@ -3284,14 +3290,25 @@ MainWindow::whatsNew()
     QDialogButtonBox *bb = new QDialogButtonBox(QDialogButtonBox::Ok);
     layout->addWidget(bb, row++, 0, 1, 3);
     connect(bb, SIGNAL(accepted()), d, SLOT(accept()));
-
+    
+    // Remove spurious linefeeds from DOS line endings
     text.replace('\r', "");
-    text.replace(QRegExp("(.)\n +(.)"), "\\1 \\2");
-    text.replace(QRegExp("\n - ([^\n]+)"), "\n<li>\\1</li>");
-    text.replace(QRegExp(": *\n"), ":\n<ul>\n");
-    text.replace(QRegExp("</li>\n\\s*\n"), "</li>\n</ul>\n\n");
-    text.replace(QRegExp("\n(\\w[^:\n]+:)"), "\n<p><b>\\1</b></p>");
-//    text.replace(QRegExp("<li>([^,.\n]+)([,.] +\\w)"), "<li><b>\\1</b>\\2");
+
+    // Un-wrap indented paragraphs (assume they are always preceded by
+    // an empty line, so don't get merged into prior para)
+    text.replace(QRegularExpression("(.)\n +(.)"), "\\1 \\2");
+
+    // Rest of para following a " - " at start becomes bulleted entry
+    text.replace(QRegularExpression("\n+ - ([^\n]+)"), "\n<li>\\1</li>");
+
+    // Line-ending ":" introduces the bulleted list
+    text.replace(QRegularExpression(": *\n"), ":\n<ul>\n");
+
+    // Blank line (after unwrapping) ends the bulleted list
+    text.replace(QRegularExpression("</li>\n\\s*\n"), "</li>\n</ul>\n\n");
+
+    // Text leading up to that line-ending ":" becomes bold heading
+    text.replace(QRegularExpression("\n(\\w[^:\n]+:)"), "\n<p><b>\\1</b></p>");
     
     textEdit->setHtml(text);
     textEdit->setReadOnly(true);

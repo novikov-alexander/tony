@@ -38,6 +38,10 @@
 #include <QMutexLocker>
 
 using std::vector;
+using std::cerr;
+using std::endl;
+
+using namespace sv;
 
 Analyser::Analyser() :
     m_document(0),

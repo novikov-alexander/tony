@@ -20,7 +20,6 @@
 #include "base/TempDirectory.h"
 #include "base/PropertyContainer.h"
 #include "base/Preferences.h"
-#include "widgets/TipDialog.h"
 #include "widgets/InteractiveFileFinder.h"
 #include "transform/TransformFactory.h"
 #include "svcore/plugin/PluginScan.h"
@@ -48,6 +47,11 @@
 
 static QMutex cleanupMutex;
 static bool cleanedUp = false;
+
+using std::cerr;
+using std::endl;
+
+using namespace sv;
 
 static void
 signalHandler(int /* signal */)
@@ -250,8 +254,6 @@ main(int argc, char **argv)
     }
 
     InteractiveFileFinder::getInstance()->setApplicationSessionExtension("ton");
-
-    QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
 
     QSplashScreen *splash = 0;
     // If we had a splash screen, we would show it here

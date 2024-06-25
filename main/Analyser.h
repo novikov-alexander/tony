@@ -28,14 +28,16 @@
 #include "base/Clipboard.h"
 #include "data/model/WaveFileModel.h"
 
+namespace sv {
 class Pane;
 class PaneStack;
 class Layer;
 class TimeValueLayer;
 class Layer;
+}
 
 class Analyser : public QObject,
-                 public Document::LayerCreationHandler
+                 public sv::Document::LayerCreationHandler
 {
     Q_OBJECT
 
@@ -45,10 +47,10 @@ public:
 
     // Process new main model, add derived layers; return "" on
     // success or error string on failure
-    QString newFileLoaded(Document *newDocument,
-                          ModelId model,
-                          PaneStack *paneStack,
-                          Pane *pane);
+    QString newFileLoaded(sv::Document *newDocument,
+                          sv::ModelId model,
+                          sv::PaneStack *paneStack,
+                          sv::Pane *pane);
 
     // Remove any derived layers, process the main model, add derived
     // layers; return "" on success or error string on failure
@@ -94,11 +96,11 @@ public:
         }
     }
 
-    ModelId getMainModelId() const {
+    sv::ModelId getMainModelId() const {
         return m_fileModel;
     }
-    std::shared_ptr<WaveFileModel> getMainModel() const {
-        return ModelById::getAs<WaveFileModel>(m_fileModel);
+    std::shared_ptr<sv::WaveFileModel> getMainModel() const {
+        return sv::ModelById::getAs<sv::WaveFileModel>(m_fileModel);
     }
 
     float getGain(Component c) const;
@@ -107,7 +109,7 @@ public:
     float getPan(Component c) const;
     void setPan(Component c, float pan);
 
-    void getEnclosingSelectionScope(sv_frame_t f, sv_frame_t &f0, sv_frame_t &f1);
+    void getEnclosingSelectionScope(sv::sv_frame_t f, sv::sv_frame_t &f0, sv::sv_frame_t &f1);
 
     struct FrequencyRange {
         FrequencyRange() : min(0), max(0) { }
@@ -134,7 +136,7 @@ public:
      * frequency range isConstrained(), analysis will be constrained
      * to that range.
      */
-    QString reAnalyseSelection(Selection sel, FrequencyRange range);
+    QString reAnalyseSelection(sv::Selection sel, FrequencyRange range);
 
     /**
      * Return true if the analysed pitch candidates are currently
@@ -162,7 +164,7 @@ public:
      * of the main pitch track to a different candidate from the
      * analysis results.
      */
-    void switchPitchCandidate(Selection sel, bool up);
+    void switchPitchCandidate(sv::Selection sel, bool up);
 
     /**
      * Return true if it is possible to switch up to another pitch
@@ -186,13 +188,13 @@ public:
      * Delete the pitch estimates from the selected area of the main
      * pitch track.
      */
-    void deletePitches(Selection sel);
+    void deletePitches(sv::Selection sel);
 
     /**
      * Move the main pitch track and any active analysis candidate
      * tracks up or down an octave in the selected area.
      */
-    void shiftOctave(Selection sel, bool up);
+    void shiftOctave(sv::Selection sel, bool up);
 
     /**
      * Remove any re-analysis layers and also reset the pitch track in
@@ -201,7 +203,7 @@ public:
      * will be available until after the next call to
      * reAnalyseSelection.
      */
-    void abandonReAnalysis(Selection sel);
+    void abandonReAnalysis(sv::Selection sel);
 
     /**
      * Remove any re-analysis layers, without any expectation of
@@ -215,13 +217,13 @@ public:
      * Import the pitch track from the given layer into our
      * pitch-track layer.
      */
-    void takePitchTrackFrom(Layer *layer);
+    void takePitchTrackFrom(sv::Layer *layer);
 
-    Pane *getPane() {
+    sv::Pane *getPane() {
         return m_pane;
     }
 
-    Layer *getLayer(Component type) {
+    sv::Layer *getLayer(Component type) {
         return m_layers[type];
     }
 
@@ -230,26 +232,26 @@ signals:
     void initialAnalysisCompleted();
 
 protected slots:
-    void layerAboutToBeDeleted(Layer *);
-    void layerCompletionChanged(ModelId);
-    void reAnalyseRegion(sv_frame_t, sv_frame_t, float, float);
+    void layerAboutToBeDeleted(sv::Layer *);
+    void layerCompletionChanged(sv::ModelId);
+    void reAnalyseRegion(sv::sv_frame_t, sv::sv_frame_t, float, float);
     void materialiseReAnalysis();
 
 protected:
-    Document *m_document;
-    ModelId m_fileModel;
-    PaneStack *m_paneStack;
-    Pane *m_pane;
+    sv::Document *m_document;
+    sv::ModelId m_fileModel;
+    sv::PaneStack *m_paneStack;
+    sv::Pane *m_pane;
 
-    mutable std::map<Component, Layer *> m_layers;
+    mutable std::map<Component, sv::Layer *> m_layers;
 
-    Clipboard m_preAnalysis;
-    Selection m_reAnalysingSelection;
+    sv::Clipboard m_preAnalysis;
+    sv::Selection m_reAnalysingSelection;
     FrequencyRange m_reAnalysingRange;
-    std::vector<Layer *> m_reAnalysisCandidates;
+    std::vector<sv::Layer *> m_reAnalysisCandidates;
     int m_currentCandidate;
     bool m_candidatesVisible;
-    Document::LayerCreationAsyncHandle m_currentAsyncHandle;
+    sv::Document::LayerCreationAsyncHandle m_currentAsyncHandle;
     QMutex m_asyncMutex;
 
     QString doAllAnalyses(bool withPitchTrack);
@@ -263,8 +265,8 @@ protected:
     void stackLayers();
     
     // Document::LayerCreationHandler method
-    void layersCreated(Document::LayerCreationAsyncHandle,
-                       std::vector<Layer *>, std::vector<Layer *>);
+    void layersCreated(sv::Document::LayerCreationAsyncHandle,
+                       std::vector<sv::Layer *>, std::vector<sv::Layer *>);
 
     void saveState(Component c) const;
     void loadState(Component c);
