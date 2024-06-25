@@ -1002,7 +1002,9 @@ MainWindow::setupRecentFilesMenu()
     m_recentFilesMenu->clear();
     vector<QString> files = m_recentFiles.getRecent();
     for (size_t i = 0; i < files.size(); ++i) {
-        QAction *action = new QAction(files[i], this);
+        QString path = files[i];
+        QAction *action = m_recentFilesMenu->addAction(path);
+        action->setObjectName(path);
         connect(action, SIGNAL(triggered()), this, SLOT(openRecentFile()));
         if (i == 0) {
             action->setShortcut(tr("Ctrl+R"));
@@ -1011,7 +1013,6 @@ MainWindow::setupRecentFilesMenu()
                  action->shortcut().toString(),
                  tr("Re-open the current or most recently opened file"));
         }
-        m_recentFilesMenu->addAction(action);
     }
 }
 
@@ -1824,7 +1825,7 @@ MainWindow::openRecentFile()
         return;
     }
 
-    QString path = action->text();
+    QString path = action->objectName();
     if (path == "") return;
 
     FileOpenStatus status = openPath(path, ReplaceSession);
