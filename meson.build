@@ -78,6 +78,7 @@ vamp_symbol_args = []
 
 dl_dep = meson.get_compiler('c').find_library('dl', required: false)
 vamphostsdk_dep = dependency('vamp-hostsdk', version: '>= 2.10', required: false)
+boost_dep = dependency('boost')
 
 if system == 'linux'
 
@@ -987,6 +988,7 @@ pyin_plugin = shared_library(
     general_link_args,
     vamp_symbol_args,
   ],
+  dependencies: boost_dep,
   name_prefix: '',
   install: true,
 )
