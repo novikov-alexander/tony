@@ -7,7 +7,7 @@
       "pin": "65eeb62d0c966f4c15db78ba28eab8d4a8ea0274"
     },
     "svgui": {
-      "pin": "c3934375208b30abaa66127d44937f5646a9117b"
+      "pin": "d46bd4b46a13be38c56f6704911b53cb1b6e3ceb"
     },
     "svapp": {
       "pin": "f51a1690f3f92e2421916d39a3385d49214e60c6"
@@ -46,10 +46,10 @@
       "pin": "fa47556361a34604e042c9a1820051424451a024"
     },
     "pyin": {
-      "pin": "a7d9c6142f8f"
+      "pin": "1d68cac9c5ecb1d81054d25d90158e5838dd78c2"
     },
     "chp": {
-      "pin": "de970142809f"
+      "pin": "340ef2791c5fdd869125b952e43ed9a1e3e8a27f"
     }
   }
 }
