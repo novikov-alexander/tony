@@ -290,7 +290,7 @@ elif system == 'windows'
   endif # architecture
 
   windows = import('windows')
-  rc = windows.compile_resources('icons/sv.rc')
+  rc = windows.compile_resources('icons/tony.rc')
 
   general_defines += [
     '-DWIN32',
