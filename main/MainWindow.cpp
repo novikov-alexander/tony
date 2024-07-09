@@ -3089,11 +3089,10 @@ MainWindow::analyseDuringRecording()
         qobject_cast<FlexiNoteLayer*>(m_analyser->getLayer(Analyser::Notes));
     auto model = ModelById::getAs<NoteModel>(layer->getModel());
     auto all_events = model->getAllEvents();
-    auto start_position = m_analysedFrames;
+    auto start_position = std::max(m_analysedFrames - 1, (long long)0);
+    size_t prevAllEventsSize = 0;
     if (!all_events.empty()) {
-        auto& last = all_events.back();
-        start_position = last.getFrame();
-        model->remove(last);
+        prevAllEventsSize = all_events.size();
     } 
     auto end_position = m_recordTarget->getRecordDuration();
     auto selection = Selection(start_position, end_position);
@@ -3102,6 +3101,17 @@ MainWindow::analyseDuringRecording()
    
     m_analyser->analyseRecordingFileToTheEnd(selection);
     
+    if (prevAllEventsSize != 0 && all_events.size() > prevAllEventsSize) {
+        auto& prevEvent = all_events[prevAllEventsSize - 1];
+        auto& nextEvent = all_events[prevAllEventsSize];
+
+        if (nextEvent.getFrame() < prevEvent.getFrame() + prevEvent.getDuration()) {
+            // merge events
+            model->add(prevEvent.withDuration(prevEvent.getDuration() + nextEvent.getDuration()));
+            model->remove(prevEvent);
+            model->remove(nextEvent);
+        }
+    }
     if (this->m_recordTarget->isRecording()) {
         // TODO (alnovi): run analysis not by time but in the process of buffer filling
         QTimer::singleShot(duration_ms, this, SLOT(analyseDuringRecording()));
