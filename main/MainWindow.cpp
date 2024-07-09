@@ -3085,7 +3085,16 @@ MainWindow::analyseDuringRecording()
   if ((recordAnalyse && this->m_recordTarget->isRecording()) || this->m_analysedFrames != 0)
   {
     int duration_ms = 1000;
-    auto start_position = this->m_analysedFrames;
+    FlexiNoteLayer* layer =
+        qobject_cast<FlexiNoteLayer*>(m_analyser->getLayer(Analyser::Notes));
+    auto model = ModelById::getAs<NoteModel>(layer->getModel());
+    auto all_events = model->getAllEvents();
+    auto start_position = m_analysedFrames;
+    if (!all_events.empty()) {
+        auto& last = all_events.back();
+        start_position = last.getFrame();
+        model->remove(last);
+    } 
     auto end_position = m_recordTarget->getRecordDuration();
     auto selection = Selection(start_position, end_position);
     this->m_analysedFrames = end_position;
