@@ -123,6 +123,21 @@ Analyser::analyseExistingFile()
 }
 
 QString
+Analyser::analyseRecordingFileToTheEnd(Selection analysingSelection)
+{
+    if (!m_document) return "Internal error: Analyser::analyseExistingFile() called with no document present";
+
+    if (!m_pane) return "Internal error: Analyser::analyseExistingFile() called with no pane present";
+
+    if (m_fileModel.isNone()) return "Internal error: Analyser::analyseExistingFile() called with no model present";
+
+    this->showPitchCandidates(true);
+    this->analyseRecording(analysingSelection);
+
+    return "";
+}
+
+QString
 Analyser::doAllAnalyses(bool withPitchTrack)
 {
     m_reAnalysingSelection = Selection();
@@ -541,6 +556,153 @@ Analyser::materialiseReAnalysis()
 }
 
 QString
+Analyser::analyseRecording(Selection sel)
+{
+    QMutexLocker locker(&m_asyncMutex);
+
+    FrequencyRange range = FrequencyRange();
+
+    auto waveFileModel = ModelById::getAs<WaveFileModel>(m_fileModel);
+    if (!waveFileModel) {
+        return "Internal error: Analyser::reAnalyseSelection() called with no model present";
+    }
+
+    if (!m_reAnalysingSelection.isEmpty()) {
+        if (sel == m_reAnalysingSelection && range == m_reAnalysingRange) {
+            cerr << "selection & range are same as current analysis, ignoring" << endl;
+            return "";
+        }
+    }
+
+    if (sel.isEmpty()) return "";
+
+    m_reAnalysingSelection = sel;
+    m_reAnalysingRange = range;
+
+    m_preAnalysis = Clipboard();
+    Layer* myLayer = m_layers[PitchTrack];
+    if (myLayer) {
+        myLayer->copy(m_pane, sel, m_preAnalysis);
+    }
+
+    TransformFactory* tf = TransformFactory::getInstance();
+
+    QString plugname1 = "pYIN";
+
+    QString base = "vamp:pyin:pyin:";
+    QString f0out = "smoothedpitchtrack";
+    QString noteout = "notes";
+
+    Transforms transforms;
+
+    QString notFound = tr("Transform \"%1\" not found. Unable to perform interactive analysis.<br><br>Are the %2 and %3 Vamp plugins correctly installed?");
+    if (!tf->haveTransform(base + f0out)) {
+        return notFound.arg(base + f0out).arg(plugname1);
+    }
+
+    if (!tf->haveTransform(base + noteout)) {
+        return notFound.arg(base + noteout).arg(plugname1);
+    }
+
+    Transform t = tf->getDefaultTransformFor
+        (base + f0out, waveFileModel->getSampleRate());
+    t.setStepSize(256);
+    t.setBlockSize(2048);
+
+    if (range.isConstrained()) {
+        t.setParameter("minfreq", float(range.min));
+        t.setParameter("maxfreq", float(range.max));
+        t.setBlockSize(4096);
+    }
+
+    // get time stamps that align with the 256-sample grid of the original extraction
+    const sv_frame_t grid = 256;
+    sv_frame_t startSample = (sel.getStartFrame() / grid) * grid;
+    if (startSample < sel.getStartFrame()) startSample += grid;
+    sv_frame_t endSample = (sel.getEndFrame() / grid) * grid;
+    if (endSample < sel.getEndFrame()) endSample += grid;
+    if (!range.isConstrained()) {
+        startSample -= 4 * grid; // 4*256 is for 4 frames offset due to timestamp shift
+        endSample -= 4 * grid;
+    }
+    else {
+        endSample -= 9 * grid; // MM says: not sure what the CHP plugin does there
+    }
+    RealTime start = RealTime::frame2RealTime(startSample, waveFileModel->getSampleRate());
+    RealTime end = RealTime::frame2RealTime(endSample, waveFileModel->getSampleRate());
+
+    RealTime duration;
+
+    if (sel.getEndFrame() > sel.getStartFrame()) {
+        duration = end - start;
+    }
+
+    cerr << "Analyser::reAnalyseSelection: start " << start << " end " << end << " original selection start " << sel.getStartFrame() << " end " << sel.getEndFrame() << " duration " << duration << endl;
+
+    if (duration <= RealTime::zeroTime) {
+        cerr << "Analyser::reAnalyseSelection: duration <= 0, not analysing" << endl;
+        return "";
+    }
+
+    t.setStartTime(start);
+    t.setDuration(duration);
+
+    transforms.push_back(t);
+
+    t.setOutput(noteout);
+
+    transforms.push_back(t);
+
+    std::vector<Layer*> layers = m_document->createDerivedLayers(transforms, m_fileModel);
+
+    for (int i = 0; i < (int)layers.size(); ++i) {
+
+        FlexiNoteLayer* f = qobject_cast<FlexiNoteLayer*>(layers[i]);
+        TimeValueLayer* t = qobject_cast<TimeValueLayer*>(layers[i]);
+
+        if (f) m_layers[Notes] = f;
+        if (t) m_layers[PitchTrack] = t;
+
+        m_document->addLayerToView(m_pane, layers[i]);
+    }
+
+    ColourDatabase* cdb = ColourDatabase::getInstance();
+
+    TimeValueLayer* pitchLayer =
+        qobject_cast<TimeValueLayer*>(m_layers[PitchTrack]);
+    if (pitchLayer) {
+        pitchLayer->setBaseColour(cdb->getColourIndex(tr("Black")));
+        auto params = pitchLayer->getPlayParameters();
+        if (params) {
+            params->setPlayPan(1);
+            params->setPlayGain(0.5);
+        }
+        connect(pitchLayer, SIGNAL(modelCompletionChanged(ModelId)),
+            this, SLOT(layerCompletionChanged(ModelId)));
+    }
+
+    FlexiNoteLayer* flexiNoteLayer =
+        qobject_cast<FlexiNoteLayer*>(m_layers[Notes]);
+    if (flexiNoteLayer) {
+        flexiNoteLayer->setBaseColour(cdb->getColourIndex(tr("Bright Blue")));
+        auto params = flexiNoteLayer->getPlayParameters();
+        if (params) {
+            params->setPlayPan(1);
+            params->setPlayGain(0.5);
+        }
+        connect(flexiNoteLayer, SIGNAL(modelCompletionChanged(ModelId)),
+            this, SLOT(layerCompletionChanged(ModelId)));
+        connect(flexiNoteLayer, SIGNAL(reAnalyseRegion(sv_frame_t, sv_frame_t, float, float)),
+            this, SLOT(reAnalyseRegion(sv_frame_t, sv_frame_t, float, float)));
+        connect(flexiNoteLayer, SIGNAL(materialiseReAnalysis()),
+            this, SLOT(materialiseReAnalysis()));
+    }
+
+    return "";
+}
+
+
+QString
 Analyser::reAnalyseSelection(Selection sel, FrequencyRange range)
 {
     QMutexLocker locker(&m_asyncMutex);
@@ -586,6 +748,8 @@ Analyser::reAnalyseSelection(Selection sel, FrequencyRange range)
 
     QString base = "vamp:pyin:localcandidatepyin:";
     QString out = "pitchtrackcandidates";
+    QString f0out = "smoothedpitchtrack";
+    QString noteout = "notes";
 
     if (range.isConstrained()) {
         base = "vamp:chp:constrainedharmonicpeak:";
@@ -599,6 +763,14 @@ Analyser::reAnalyseSelection(Selection sel, FrequencyRange range)
         return notFound.arg(base + out).arg(plugname1).arg(plugname2);
     }
 
+    if (!tf->haveTransform(base + f0out)) {
+        return notFound.arg(base + f0out).arg(plugname1).arg(plugname2);
+    }
+
+    if (!tf->haveTransform(base + noteout)) {
+        return notFound.arg(base + noteout).arg(plugname1).arg(plugname2);
+    }
+       
     Transform t = tf->getDefaultTransformFor
         (base + out, waveFileModel->getSampleRate());
     t.setStepSize(256);

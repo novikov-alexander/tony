@@ -842,6 +842,9 @@ MainWindow::updateAnalyseStates()
     bool autoAnalyse = settings.value("auto-analysis", true).toBool();
     m_autoAnalyse->setChecked(autoAnalyse);
 
+    bool analyseDuringRecord = settings.value("record-analysis", true).toBool();
+    m_analyseDuringRecord->setChecked(analyseDuringRecord);
+
     std::map<QString, QAction *> actions {
         { "precision-analysis", m_precise },
         { "lowamp-analysis", m_lowamp },
@@ -3068,9 +3071,8 @@ MainWindow::analyseNow()
 void
 MainWindow::analyseDuringRecordingRunner()
 {
-  // analyseNow();
-  // analyseDuringRecording();
-  // QTimer::singleShot(5000, this, SLOT(analyseNow()));
+  this->m_analysedFrames = 0;
+  analyseDuringRecording();
 }
 
 void
@@ -3080,7 +3082,7 @@ MainWindow::analyseDuringRecording()
   settings.beginGroup("Analyser");
   bool recordAnalyse = settings.value("record-analysis", true).toBool();
   settings.endGroup();
-  if (recordAnalyse && this->m_recordTarget->isRecording())
+  if ((recordAnalyse && this->m_recordTarget->isRecording()) || this->m_analysedFrames != 0)
   {
     int duration_ms = 1000;
     auto start_position = this->m_analysedFrames;
@@ -3088,19 +3090,14 @@ MainWindow::analyseDuringRecording()
     auto selection = Selection(start_position, end_position);
     this->m_analysedFrames = end_position;
     (tr("Analyse Audio"), true);
-    m_analyser->showPitchCandidates(true);
-    m_analyser->reAnalyseSelection(
-          selection,
-          Analyser::FrequencyRange());
-    updateAnalyseStates();
-    // TODO (alnovi): run analysis not by time but in the process of buffer filling
-    QTimer::singleShot(duration_ms, this, SLOT(analyseDuringRecording()));
-  }
-  /*
-    TODO (alnovi): else {
-      analyse tail when recording is stopped
+   
+    m_analyser->analyseRecordingFileToTheEnd(selection);
+    
+    if (this->m_recordTarget->isRecording()) {
+        // TODO (alnovi): run analysis not by time but in the process of buffer filling
+        QTimer::singleShot(duration_ms, this, SLOT(analyseDuringRecording()));
     }
-  */
+  }
 }
 
 void

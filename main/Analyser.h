@@ -54,7 +54,8 @@ public:
     // layers; return "" on success or error string on failure
     QString analyseExistingFile();
 
-    QString doAllAnalyses(bool withPitchTrack);
+    // Completes analysis from the last position to the end
+    QString analyseRecordingFileToTheEnd(Selection analysingSelection);
 
     // Discard any layers etc associated with the current document
     void fileClosed();
@@ -128,6 +129,13 @@ public:
      * group in QSettings.
      */
     static std::map<QString, QVariant> getAnalysisSettings();
+
+    /**
+     * Analyse the selection and schedule asynchronous adds of
+     * candidate layers for the region it contains. Returns "" on
+     * success or a user-readable error string on failure.
+     */
+    QString analyseRecording(Selection sel);
 
     /**
      * Analyse the selection and schedule asynchronous adds of
