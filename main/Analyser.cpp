@@ -565,6 +565,51 @@ Analyser::materialiseReAnalysis()
     switchPitchCandidate(m_reAnalysingSelection, true); // or false, doesn't matter
 }
 
+template <typename LayerType>
+void setBaseColour(LayerType* layer, const QString& colourName, ColourDatabase* cdb) {
+    layer->setBaseColour(cdb->getColourIndex(colourName));
+}
+
+// Generalized helper function to process layers
+template <typename LayerType, typename ModelType>
+void processLayer(LayerType* layer, LayerType* targetLayer, std::function<void(std::shared_ptr<ModelType>, std::shared_ptr<ModelType>)> customProcessing) {
+    QObject::connect(layer, &TimeValueLayer::modelCompletionChanged, [layer, targetLayer, customProcessing](ModelId modelId) {
+        auto model = ModelById::getAs<ModelType>(modelId);
+
+        if (model->getCompletion() == 100) {
+            auto toModel = ModelById::getAs<ModelType>(targetLayer->getModel());
+            EventVector points = model->getAllEvents();
+
+            // Custom processing logic
+            customProcessing(model, toModel);
+
+            for (const Event& p : points) {
+                toModel->add(p);
+            }
+
+            QObject::disconnect(layer, &TimeValueLayer::modelCompletionChanged, nullptr, nullptr);
+            // TODO (alnovi): remove the layer.
+        }
+        });
+}
+
+// Custom processing logic for FlexiNoteLayer
+void processNoteModel(std::shared_ptr<NoteModel> model, std::shared_ptr<NoteModel> toModel) {
+    auto allEvents = toModel->getAllEvents();
+    auto points = model->getAllEvents();
+
+    if (!allEvents.empty() && !points.empty()) {
+        auto& prevEvent = allEvents.back();
+        auto& nextEvent = points.front();
+
+        // Merge events
+        if (nextEvent.getFrame() < prevEvent.getFrame() + prevEvent.getDuration()) {
+            points[0] = prevEvent.withDuration(prevEvent.getDuration() + nextEvent.getDuration());
+            toModel->remove(prevEvent);
+        }
+    }
+}
+
 QString
 Analyser::analyseRecording(Selection sel)
 {
@@ -590,11 +635,11 @@ Analyser::analyseRecording(Selection sel)
     m_reAnalysingRange = range;
 
     m_preAnalysis = Clipboard();
-    Layer* pitchLayer = m_layers[PitchTrack];
+    auto* pitchLayer = qobject_cast<TimeValueLayer*>(m_layers[PitchTrack]);
     if (pitchLayer) {
         pitchLayer->copy(m_pane, sel, m_preAnalysis);
     }
-    Layer* noteLayer = m_layers[Notes];
+    auto* noteLayer = qobject_cast<FlexiNoteLayer*>(m_layers[Notes]);
 
     TransformFactory* tf = TransformFactory::getInstance();
 
@@ -673,62 +718,17 @@ Analyser::analyseRecording(Selection sel)
         FlexiNoteLayer* tempNoteLayer = qobject_cast<FlexiNoteLayer*>(layer);
         TimeValueLayer* tempPitchLayer = qobject_cast<TimeValueLayer*>(layer);
 
-       if (tempPitchLayer) {
-            tempPitchLayer->setBaseColour(cdb->getColourIndex(tr("Black")));
+        if (tempPitchLayer) {
+            setBaseColour(tempPitchLayer, tr("Black"), cdb);
+            processLayer<TimeValueLayer, SparseTimeValueModel>(tempPitchLayer, pitchLayer, [](std::shared_ptr<SparseTimeValueModel>, std::shared_ptr<SparseTimeValueModel>) {
+                // No additional custom processing needed for TimeValueLayer
+                });
+        }
 
-            connect(tempPitchLayer, &TimeValueLayer::modelCompletionChanged, [tempPitchLayer, pitchLayer](ModelId modelId) {
-                auto model = ModelById::getAs<SparseTimeValueModel>(modelId);
-
-                if (model->getCompletion() == 100) {
-                    auto toModel = ModelById::getAs<SparseTimeValueModel>(pitchLayer->getModel());
-
-                    EventVector points = model->getAllEvents();
-
-                    for (Event p : points) {
-                        toModel->add(p);
-                    }
-
-                    disconnect(tempPitchLayer, &TimeValueLayer::modelCompletionChanged, nullptr, nullptr);
-
-                    //TODO (alnovi): remove the layer.
-                }
-            });
-       }
-
-       if (tempNoteLayer) {
-           tempNoteLayer->setBaseColour(cdb->getColourIndex(tr("Bright Blue")));
-
-           connect(tempNoteLayer, &TimeValueLayer::modelCompletionChanged, [tempNoteLayer, noteLayer](ModelId modelId) {
-               auto model = ModelById::getAs<NoteModel>(modelId);
-
-               if (model->getCompletion() == 100) {
-
-                   auto toModel = ModelById::getAs<NoteModel>(noteLayer->getModel());
-
-                   EventVector points = model->getAllEvents();
-
-                   auto all_events = toModel->getAllEvents();
-                   if (!all_events.empty() && !points.empty()) {
-                       auto& prevEvent = all_events.back();
-                       auto& nextEvent = points.front();
-
-                       // Merge events
-                       if (nextEvent.getFrame() < prevEvent.getFrame() + prevEvent.getDuration()) {
-                           points[0] = prevEvent.withDuration(prevEvent.getDuration() + nextEvent.getDuration());
-                           toModel->remove(prevEvent);
-                       }
-                   }
-                   
-                   for (Event p : points) {
-                       toModel->add(p);
-                   }
-
-                   disconnect(tempNoteLayer, &TimeValueLayer::modelCompletionChanged, nullptr, nullptr);
-
-                   //TODO (alnovi): remove the layer.        
-               }
-           });
-       }
+        if (tempNoteLayer) {
+            setBaseColour(tempNoteLayer, tr("Bright Blue"), cdb);
+            processLayer<FlexiNoteLayer, NoteModel>(tempNoteLayer, noteLayer, processNoteModel);
+        }
     }
   
     return "";

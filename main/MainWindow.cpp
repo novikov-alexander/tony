@@ -3084,7 +3084,7 @@ MainWindow::analyseDuringRecording()
   settings.endGroup();
   if ((recordAnalyse && this->m_recordTarget->isRecording()) || this->m_analysedFrames != 0)
   {
-    int duration_ms = 1000;
+    int duration_ms = 250;
 
     // We start with a 100-frame overlap to ensure we capture attacks in time
     sv_frame_t overlap = 100;
