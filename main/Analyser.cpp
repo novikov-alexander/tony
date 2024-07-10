@@ -698,6 +698,39 @@ Analyser::analyseRecording(Selection sel)
             this, SLOT(materialiseReAnalysis()));
     }
 
+    // TODO (alnovi): instead of creation of new layers, subscribe on succeeded transformation completions and copy/paste
+    // from new layers to existing ones:
+
+    /*
+    for (int i = 0; i < (int)layers.size(); ++i) {
+
+	    FlexiNoteLayer* f = qobject_cast<FlexiNoteLayer*>(layers[i]);
+	    TimeValueLayer* t = qobject_cast<TimeValueLayer*>(layers[i]);
+
+	    if (f) {
+		    auto clipboard = Clipboard();
+
+		    auto fModel = ModelById::getAs<NoteModel>(f->getModel());
+		    auto nModel = ModelById::getAs<NoteModel>(noteTrack->getModel());
+
+		    if (!fModel->getAllEvents().empty()) {
+			    f->copy(m_pane, sel, clipboard);
+			    noteTrack->paste(m_pane, clipboard, 0, false);
+		    }
+	    }
+
+	    if (t) {
+		    auto params = t->getPlayParameters();
+		    if (params) {
+			    params->setPlayAudible(false);
+		    }
+
+		    auto clipboard = Clipboard();
+		    t->copy(m_pane, sel, clipboard);
+		    pitchTrack->paste(m_pane, clipboard, 0, false);
+	    }
+    }
+    */
     return "";
 }
 
