@@ -240,6 +240,9 @@ signals:
     void initialAnalysisCompleted();
 
 protected slots:
+    void updatePitchTrack(ModelId);
+    void updateNoteLayer(ModelId);
+
     void layerAboutToBeDeleted(Layer *);
     void layerCompletionChanged(ModelId);
     void reAnalyseRegion(sv_frame_t, sv_frame_t, float, float);

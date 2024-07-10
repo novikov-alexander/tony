@@ -356,6 +356,16 @@ Analyser::addWaveform()
     return "";
 }
 
+void
+Analyser::updatePitchTrack(ModelId) {
+
+}
+
+void
+Analyser::updateNoteLayer(ModelId) {
+
+}
+
 QString
 Analyser::addAnalyses()
 {
@@ -580,10 +590,11 @@ Analyser::analyseRecording(Selection sel)
     m_reAnalysingRange = range;
 
     m_preAnalysis = Clipboard();
-    Layer* myLayer = m_layers[PitchTrack];
-    if (myLayer) {
-        myLayer->copy(m_pane, sel, m_preAnalysis);
+    Layer* pitchLayer = m_layers[PitchTrack];
+    if (pitchLayer) {
+        pitchLayer->copy(m_pane, sel, m_preAnalysis);
     }
+    Layer* noteLayer = m_layers[Notes];
 
     TransformFactory* tf = TransformFactory::getInstance();
 
@@ -655,82 +666,71 @@ Analyser::analyseRecording(Selection sel)
 
     std::vector<Layer*> layers = m_document->createDerivedLayers(transforms, m_fileModel);
 
-    for (int i = 0; i < (int)layers.size(); ++i) {
-
-        FlexiNoteLayer* f = qobject_cast<FlexiNoteLayer*>(layers[i]);
-        TimeValueLayer* t = qobject_cast<TimeValueLayer*>(layers[i]);
-
-        if (f) m_layers[Notes] = f;
-        if (t) m_layers[PitchTrack] = t;
-
-        m_document->addLayerToView(m_pane, layers[i]);
-    }
-
     ColourDatabase* cdb = ColourDatabase::getInstance();
 
-    TimeValueLayer* pitchLayer =
-        qobject_cast<TimeValueLayer*>(m_layers[PitchTrack]);
-    if (pitchLayer) {
-        pitchLayer->setBaseColour(cdb->getColourIndex(tr("Black")));
-        auto params = pitchLayer->getPlayParameters();
-        if (params) {
-            params->setPlayPan(1);
-            params->setPlayGain(0.5);
-        }
-        connect(pitchLayer, SIGNAL(modelCompletionChanged(ModelId)),
-            this, SLOT(layerCompletionChanged(ModelId)));
+    for (auto* layer : layers) {
+
+        FlexiNoteLayer* tempNoteLayer = qobject_cast<FlexiNoteLayer*>(layer);
+        TimeValueLayer* tempPitchLayer = qobject_cast<TimeValueLayer*>(layer);
+
+       if (tempPitchLayer) {
+            tempPitchLayer->setBaseColour(cdb->getColourIndex(tr("Black")));
+
+            connect(tempPitchLayer, &TimeValueLayer::modelCompletionChanged, [tempPitchLayer, pitchLayer](ModelId modelId) {
+                auto model = ModelById::getAs<SparseTimeValueModel>(modelId);
+
+                if (model->getCompletion() == 100) {
+                    auto toModel = ModelById::getAs<SparseTimeValueModel>(pitchLayer->getModel());
+
+                    EventVector points = model->getAllEvents();
+
+                    for (Event p : points) {
+                        toModel->add(p);
+                    }
+
+                    disconnect(tempPitchLayer, &TimeValueLayer::modelCompletionChanged, nullptr, nullptr);
+
+                    //TODO (alnovi): remove the layer.
+                }
+            });
+       }
+
+       if (tempNoteLayer) {
+           tempNoteLayer->setBaseColour(cdb->getColourIndex(tr("Bright Blue")));
+
+           connect(tempNoteLayer, &TimeValueLayer::modelCompletionChanged, [tempNoteLayer, noteLayer](ModelId modelId) {
+               auto model = ModelById::getAs<NoteModel>(modelId);
+
+               if (model->getCompletion() == 100) {
+
+                   auto toModel = ModelById::getAs<NoteModel>(noteLayer->getModel());
+
+                   EventVector points = model->getAllEvents();
+
+                   auto all_events = toModel->getAllEvents();
+                   if (!all_events.empty() && !points.empty()) {
+                       auto& prevEvent = all_events.back();
+                       auto& nextEvent = points.front();
+
+                       // Merge events
+                       if (nextEvent.getFrame() < prevEvent.getFrame() + prevEvent.getDuration()) {
+                           points[0] = prevEvent.withDuration(prevEvent.getDuration() + nextEvent.getDuration());
+                           toModel->remove(prevEvent);
+                       }
+                   }
+                   
+                   for (Event p : points) {
+                       toModel->add(p);
+                   }
+
+                   disconnect(tempNoteLayer, &TimeValueLayer::modelCompletionChanged, nullptr, nullptr);
+
+                   //TODO (alnovi): remove the layer.        
+               }
+           });
+       }
     }
-
-    FlexiNoteLayer* flexiNoteLayer =
-        qobject_cast<FlexiNoteLayer*>(m_layers[Notes]);
-    if (flexiNoteLayer) {
-        flexiNoteLayer->setBaseColour(cdb->getColourIndex(tr("Bright Blue")));
-        auto params = flexiNoteLayer->getPlayParameters();
-        if (params) {
-            params->setPlayPan(1);
-            params->setPlayGain(0.5);
-        }
-        connect(flexiNoteLayer, SIGNAL(modelCompletionChanged(ModelId)),
-            this, SLOT(layerCompletionChanged(ModelId)));
-        connect(flexiNoteLayer, SIGNAL(reAnalyseRegion(sv_frame_t, sv_frame_t, float, float)),
-            this, SLOT(reAnalyseRegion(sv_frame_t, sv_frame_t, float, float)));
-        connect(flexiNoteLayer, SIGNAL(materialiseReAnalysis()),
-            this, SLOT(materialiseReAnalysis()));
-    }
-
-    // TODO (alnovi): instead of creation of new layers, subscribe on succeeded transformation completions and copy/paste
-    // from new layers to existing ones:
-
-    /*
-    for (int i = 0; i < (int)layers.size(); ++i) {
-
-	    FlexiNoteLayer* f = qobject_cast<FlexiNoteLayer*>(layers[i]);
-	    TimeValueLayer* t = qobject_cast<TimeValueLayer*>(layers[i]);
-
-	    if (f) {
-		    auto clipboard = Clipboard();
-
-		    auto fModel = ModelById::getAs<NoteModel>(f->getModel());
-		    auto nModel = ModelById::getAs<NoteModel>(noteTrack->getModel());
-
-		    if (!fModel->getAllEvents().empty()) {
-			    f->copy(m_pane, sel, clipboard);
-			    noteTrack->paste(m_pane, clipboard, 0, false);
-		    }
-	    }
-
-	    if (t) {
-		    auto params = t->getPlayParameters();
-		    if (params) {
-			    params->setPlayAudible(false);
-		    }
-
-		    auto clipboard = Clipboard();
-		    t->copy(m_pane, sel, clipboard);
-		    pitchTrack->paste(m_pane, clipboard, 0, false);
-	    }
-    }
-    */
+  
     return "";
 }
 

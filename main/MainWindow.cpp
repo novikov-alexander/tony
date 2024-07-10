@@ -3085,15 +3085,10 @@ MainWindow::analyseDuringRecording()
   if ((recordAnalyse && this->m_recordTarget->isRecording()) || this->m_analysedFrames != 0)
   {
     int duration_ms = 1000;
-    FlexiNoteLayer* layer =
-        qobject_cast<FlexiNoteLayer*>(m_analyser->getLayer(Analyser::Notes));
-    auto model = ModelById::getAs<NoteModel>(layer->getModel());
-    auto all_events = model->getAllEvents();
-    auto start_position = std::max(m_analysedFrames - 1, (long long)0);
-    size_t prevAllEventsSize = 0;
-    if (!all_events.empty()) {
-        prevAllEventsSize = all_events.size();
-    } 
+
+    // We start with a 100-frame overlap to ensure we capture attacks in time
+    sv_frame_t overlap = 100;
+    auto start_position = std::max(m_analysedFrames - overlap, 0LL);
     auto end_position = m_recordTarget->getRecordDuration();
     auto selection = Selection(start_position, end_position);
     this->m_analysedFrames = end_position;
@@ -3101,17 +3096,6 @@ MainWindow::analyseDuringRecording()
    
     m_analyser->analyseRecordingFileToTheEnd(selection);
     
-    if (prevAllEventsSize != 0 && all_events.size() > prevAllEventsSize) {
-        auto& prevEvent = all_events[prevAllEventsSize - 1];
-        auto& nextEvent = all_events[prevAllEventsSize];
-
-        if (nextEvent.getFrame() < prevEvent.getFrame() + prevEvent.getDuration()) {
-            // merge events
-            model->add(prevEvent.withDuration(prevEvent.getDuration() + nextEvent.getDuration()));
-            model->remove(prevEvent);
-            model->remove(nextEvent);
-        }
-    }
     if (this->m_recordTarget->isRecording()) {
         // TODO (alnovi): run analysis not by time but in the process of buffer filling
         QTimer::singleShot(duration_ms, this, SLOT(analyseDuringRecording()));
