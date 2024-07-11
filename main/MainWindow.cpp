@@ -3087,7 +3087,7 @@ MainWindow::analyseDuringRecording()
     int duration_ms = 250;
 
     // We start with a 100-frame overlap to ensure we capture attacks in time
-    sv_frame_t overlap = 100;
+    sv_frame_t overlap = 0;
     auto start_position = std::max(m_analysedFrames - overlap, 0LL);
     auto end_position = m_recordTarget->getRecordDuration();
     auto selection = Selection(start_position, end_position);
