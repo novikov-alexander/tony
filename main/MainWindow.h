@@ -230,8 +230,6 @@ protected:
     KeyReference  *m_keyReference;
     VersionTester *m_versionTester;
 
-    sv_frame_t m_analysedFrames = 0;
-
     QString        m_newerVersionIs;
 
     sv_frame_t m_selectionAnchor;

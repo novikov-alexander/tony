@@ -3071,36 +3071,27 @@ MainWindow::analyseNow()
 void
 MainWindow::analyseDuringRecordingRunner()
 {
-  this->m_analysedFrames = 0;
-  analyseDuringRecording();
+    QSettings settings;
+    settings.beginGroup("Analyser");
+    bool recordAnalyse = settings.value("record-analysis", true).toBool();
+    settings.endGroup();
+    if ((recordAnalyse && this->m_recordTarget->isRecording()))
+    {
+        analyseDuringRecording();
+    }
 }
 
 void
 MainWindow::analyseDuringRecording()
 {
-  QSettings settings;
-  settings.beginGroup("Analyser");
-  bool recordAnalyse = settings.value("record-analysis", true).toBool();
-  settings.endGroup();
-  if ((recordAnalyse && this->m_recordTarget->isRecording()) || this->m_analysedFrames != 0)
-  {
-    int duration_ms = 250;
+    int duration_ms = 200;
 
-    // We start with a 100-frame overlap to ensure we capture attacks in time
-    sv_frame_t overlap = 0;
-    auto start_position = std::max(m_analysedFrames - overlap, 0LL);
-    auto end_position = m_recordTarget->getRecordDuration();
-    auto selection = Selection(start_position, end_position);
-    this->m_analysedFrames = end_position;
-    (tr("Analyse Audio"), true);
-   
-    m_analyser->analyseRecordingFileToTheEnd(selection);
+    m_analyser->analyseRecordingToEnd(m_recordTarget->getRecordDuration());
     
     if (this->m_recordTarget->isRecording()) {
         // TODO (alnovi): run analysis not by time but in the process of buffer filling
         QTimer::singleShot(duration_ms, this, SLOT(analyseDuringRecording()));
     }
-  }
 }
 
 void
