@@ -582,6 +582,20 @@ Analyser::materialiseReAnalysis()
     switchPitchCandidate(m_reAnalysingSelection, true); // or false, doesn't matter
 }
 
+void
+Analyser::updatePitchTrack(sv::ModelId)
+{
+    // Implementation for updatePitchTrack slot
+    emit layersChanged();
+}
+
+void
+Analyser::updateNoteLayer(sv::ModelId)
+{
+    // Implementation for updateNoteLayer slot
+    emit layersChanged();
+}
+
 template <typename LayerType>
 void setBaseColour(LayerType* layer, const QString& colourName, ColourDatabase* cdb) {
     layer->setBaseColour(cdb->getColourIndex(colourName));
@@ -1282,5 +1296,3 @@ Analyser::setPan(Component c, float pan)
         saveState(c);
     }
 }
-
-

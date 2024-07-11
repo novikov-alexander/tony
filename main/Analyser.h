@@ -57,7 +57,7 @@ public:
     QString analyseExistingFile();
 
     // Completes analysis from the last position to the end
-    QString analyseRecordingToEnd(sv_frame_t record_duration);
+    QString analyseRecordingToEnd(sv::sv_frame_t record_duration);
 
     // Discard any layers etc associated with the current document
     void fileClosed();
@@ -137,7 +137,7 @@ public:
      * candidate layers for the region it contains. Returns "" on
      * success or a user-readable error string on failure.
      */
-    QString analyseRecording(Selection sel);
+    QString analyseRecording(sv::Selection sel);
 
     /**
      * Analyse the selection and schedule asynchronous adds of
@@ -242,8 +242,8 @@ signals:
     void initialAnalysisCompleted();
 
 protected slots:
-    void updatePitchTrack(ModelId);
-    void updateNoteLayer(ModelId);
+    void updatePitchTrack(sv::ModelId);
+    void updateNoteLayer(sv::ModelId);
     void layerAboutToBeDeleted(sv::Layer *);
     void layerCompletionChanged(sv::ModelId);
     void reAnalyseRegion(sv::sv_frame_t, sv::sv_frame_t, float, float);
@@ -259,7 +259,7 @@ protected:
 
     sv::Clipboard m_preAnalysis;
     sv::Selection m_reAnalysingSelection;
-    sv_frame_t m_analysedFrames = 0;
+    sv::sv_frame_t m_analysedFrames = 0;
     FrequencyRange m_reAnalysingRange;
     std::vector<sv::Layer *> m_reAnalysisCandidates;
     int m_currentCandidate;
