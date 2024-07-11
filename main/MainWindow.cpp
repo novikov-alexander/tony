@@ -3077,21 +3077,19 @@ MainWindow::analyseDuringRecordingRunner()
     settings.endGroup();
     if ((recordAnalyse && this->m_recordTarget->isRecording()))
     {
-        analyseDuringRecording();
+        connect(this->m_recordTarget, &AudioCallbackRecordTarget::recordDurationChanged, this, &MainWindow::analyseDuringRecording);
+        connect(this->m_recordTarget, &AudioCallbackRecordTarget::recordCompleted, this, [this]() {
+            disconnect(this->m_recordTarget, &AudioCallbackRecordTarget::recordDurationChanged, nullptr, nullptr);
+            disconnect(this->m_recordTarget, &AudioCallbackRecordTarget::recordCompleted, nullptr, nullptr);
+            analyseDuringRecording();
+        });
     }
 }
 
 void
 MainWindow::analyseDuringRecording()
 {
-    constexpr int duration_ms = 100;
-
     m_analyser->analyseRecordingToEnd(m_recordTarget->getRecordDuration());
-    
-    if (this->m_recordTarget->isRecording()) {
-        // TODO (alnovi): run analysis not by time but in the process of buffer filling
-        QTimer::singleShot(duration_ms, this, SLOT(analyseDuringRecording()));
-    }
 }
 
 void
