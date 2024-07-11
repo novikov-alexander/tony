@@ -57,7 +57,7 @@ public:
     QString analyseExistingFile();
 
     // Completes analysis from the last position to the end
-    QString analyseRecordingFileToTheEnd(Selection analysingSelection);
+    QString analyseRecordingToEnd(sv_frame_t record_duration);
 
     // Discard any layers etc associated with the current document
     void fileClosed();
@@ -259,6 +259,7 @@ protected:
 
     sv::Clipboard m_preAnalysis;
     sv::Selection m_reAnalysingSelection;
+    sv_frame_t m_analysedFrames = 0;
     FrequencyRange m_reAnalysingRange;
     std::vector<sv::Layer *> m_reAnalysisCandidates;
     int m_currentCandidate;

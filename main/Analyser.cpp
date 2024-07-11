@@ -127,7 +127,7 @@ Analyser::analyseExistingFile()
 }
 
 QString
-Analyser::analyseRecordingFileToTheEnd(Selection analysingSelection)
+Analyser::analyseRecordingToEnd(sv_frame_t record_duration)
 {
     if (!m_document) return "Internal error: Analyser::analyseExistingFile() called with no document present";
 
@@ -135,8 +135,15 @@ Analyser::analyseRecordingFileToTheEnd(Selection analysingSelection)
 
     if (m_fileModel.isNone()) return "Internal error: Analyser::analyseExistingFile() called with no model present";
 
-    this->showPitchCandidates(true);
+    // We start with a 5000-frame overlap to ensure we capture attacks in time (~113ms)
+    sv_frame_t overlap = 5000;
+    auto start_position = std::max(m_analysedFrames - overlap, 0LL);
+    auto end_position = record_duration;
+    Selection analysingSelection = Selection(start_position, end_position);
+
     this->analyseRecording(analysingSelection);
+
+    m_analysedFrames = end_position;
 
     return "";
 }
@@ -358,16 +365,6 @@ Analyser::addWaveform()
 
     m_layers[Audio] = waveform;
     return "";
-}
-
-void
-Analyser::updatePitchTrack(ModelId) {
-
-}
-
-void
-Analyser::updateNoteLayer(ModelId) {
-
 }
 
 QString
@@ -598,9 +595,9 @@ void processLayer(LayerType* layer, LayerType* targetLayer, std::function<EventV
 }
 
 // Custom processing logic for FlexiNoteLayer
-static EventVector processNoteModel(sv_frame_t context_start, std::shared_ptr<NoteModel> model, std::shared_ptr<NoteModel> toModel) {
+static EventVector processNoteModel(sv_frame_t context_start, std::shared_ptr<NoteModel> fromModel, std::shared_ptr<NoteModel> toModel) {
     auto allEvents = toModel->getAllEvents();
-    auto points = model->getAllEvents();
+    auto points = fromModel->getAllEvents();
 
     // Vamp doesn't add current timestamp for note features, so, do it manually
     std::transform(points.begin(), points.end(), points.begin(), [&](const auto& point) {
@@ -611,9 +608,13 @@ static EventVector processNoteModel(sv_frame_t context_start, std::shared_ptr<No
         auto& prevEvent = allEvents.back();
         auto& nextEvent = points.front();
 
-        // Merge events
-        if (nextEvent.getFrame() < prevEvent.getFrame() + prevEvent.getDuration()) {
-            points[0] = prevEvent.withDuration(prevEvent.getDuration() + nextEvent.getDuration());
+        // Merge events but don't be too greedy
+        if (nextEvent.getFrame() < prevEvent.getFrame() + prevEvent.getDuration() && nextEvent.getFrame() > prevEvent.getFrame()) {
+            auto overallDuration = prevEvent.getDuration() + nextEvent.getDuration();
+            auto overlapDuration = prevEvent.getFrame() + prevEvent.getDuration() - nextEvent.getFrame();
+            points[0] = prevEvent.withDuration(overallDuration - overlapDuration);
+            
+            // TODO (alnovi): remove all events from toModel which ends after context_start
             toModel->remove(prevEvent);
         }
     }
