@@ -576,7 +576,7 @@ void setBaseColour(LayerType* layer, const QString& colourName, ColourDatabase* 
 
 // Generalized helper function to process layers
 template <typename LayerType, typename ModelType>
-void processLayer(LayerType* layer, LayerType* targetLayer, std::function<void(std::shared_ptr<ModelType>, std::shared_ptr<ModelType>)> customProcessing) {
+void processLayer(LayerType* layer, LayerType* targetLayer, std::function<EventVector(std::shared_ptr<ModelType>, std::shared_ptr<ModelType>)> customProcessing) {
     QObject::connect(layer, &TimeValueLayer::modelCompletionChanged, [layer, targetLayer, customProcessing](ModelId modelId) {
         auto model = ModelById::getAs<ModelType>(modelId);
 
@@ -585,7 +585,7 @@ void processLayer(LayerType* layer, LayerType* targetLayer, std::function<void(s
             EventVector points = model->getAllEvents();
 
             // Custom processing logic
-            customProcessing(model, toModel);
+            points = customProcessing(model, toModel);
 
             for (const Event& p : points) {
                 toModel->add(p);
@@ -598,9 +598,14 @@ void processLayer(LayerType* layer, LayerType* targetLayer, std::function<void(s
 }
 
 // Custom processing logic for FlexiNoteLayer
-void processNoteModel(std::shared_ptr<NoteModel> model, std::shared_ptr<NoteModel> toModel) {
+static EventVector processNoteModel(sv_frame_t context_start, std::shared_ptr<NoteModel> model, std::shared_ptr<NoteModel> toModel) {
     auto allEvents = toModel->getAllEvents();
     auto points = model->getAllEvents();
+
+    // Vamp doesn't add current timestamp for note features, so, do it manually
+    std::transform(points.begin(), points.end(), points.begin(), [&](const auto& point) {
+        return point.withFrame(point.getFrame() + context_start);
+    });
 
     if (!allEvents.empty() && !points.empty()) {
         auto& prevEvent = allEvents.back();
@@ -612,6 +617,8 @@ void processNoteModel(std::shared_ptr<NoteModel> model, std::shared_ptr<NoteMode
             toModel->remove(prevEvent);
         }
     }
+
+    return points;
 }
 
 QString
@@ -724,14 +731,15 @@ Analyser::analyseRecording(Selection sel)
 
         if (tempPitchLayer) {
             setBaseColour(tempPitchLayer, tr("Black"), cdb);
-            processLayer<TimeValueLayer, SparseTimeValueModel>(tempPitchLayer, pitchLayer, [](std::shared_ptr<SparseTimeValueModel>, std::shared_ptr<SparseTimeValueModel>) {
+            processLayer<TimeValueLayer, SparseTimeValueModel>(tempPitchLayer, pitchLayer, [](std::shared_ptr<SparseTimeValueModel> model, std::shared_ptr<SparseTimeValueModel>) {
                 // No additional custom processing needed for TimeValueLayer
-                });
+                return model->getAllEvents();
+            });
         }
 
         if (tempNoteLayer) {
             setBaseColour(tempNoteLayer, tr("Bright Blue"), cdb);
-            processLayer<FlexiNoteLayer, NoteModel>(tempNoteLayer, noteLayer, processNoteModel);
+            processLayer<FlexiNoteLayer, NoteModel>(tempNoteLayer, noteLayer, std::bind(processNoteModel, sel.getStartFrame(), std::placeholders::_1, std::placeholders::_2));
         }
     }
   
