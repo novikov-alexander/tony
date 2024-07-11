@@ -125,21 +125,21 @@ Analyser::analyseExistingFile()
 QString
 Analyser::analyseRecordingToEnd(sv_frame_t record_duration)
 {
-    if (!m_document) return "Internal error: Analyser::analyseExistingFile() called with no document present";
+    if (!m_document) return "Internal error: Analyser::analyseRecordingToEnd() called with no document present";
 
-    if (!m_pane) return "Internal error: Analyser::analyseExistingFile() called with no pane present";
+    if (!m_pane) return "Internal error: Analyser::analyseRecordingToEnd() called with no pane present";
 
-    if (m_fileModel.isNone()) return "Internal error: Analyser::analyseExistingFile() called with no model present";
+    if (m_fileModel.isNone()) return "Internal error: Analyser::analyseRecordingToEnd() called with no model present";
 
-    // We start with a 5000-frame overlap to ensure we capture attacks in time (~113ms)
-    sv_frame_t overlap = 5000;
-    auto start_position = std::max(m_analysedFrames - overlap, 0LL);
-    auto end_position = record_duration;
-    Selection analysingSelection = Selection(start_position, end_position);
+    // We start with a 2500-frame overlap to ensure we capture instrument attacks in time (~56ms)
+    sv_frame_t overlap = 2500;
+    auto startPosition = std::max(m_analysedFrames - overlap, 0LL);
+    auto endPosition = record_duration;
+    Selection analysingSelection = Selection(startPosition, endPosition);
 
     this->analyseRecording(analysingSelection);
 
-    m_analysedFrames = end_position;
+    m_analysedFrames = endPosition;
 
     return "";
 }
@@ -363,6 +363,76 @@ Analyser::addWaveform()
     return "";
 }
 
+std::map<QString, bool> getAnalysisSettingsFromSettings()
+{
+    std::map<QString, bool> analysisSettings;
+
+    QSettings settings;
+    settings.beginGroup("Analyser");
+
+    analysisSettings["precision-analysis"] = settings.value("precision-analysis", false).toBool();
+    analysisSettings["lowamp-analysis"] = settings.value("lowamp-analysis", true).toBool();
+    analysisSettings["onset-analysis"] = settings.value("onset-analysis", true).toBool();
+    analysisSettings["prune-analysis"] = settings.value("prune-analysis", true).toBool();
+
+    settings.endGroup();
+
+    return analysisSettings;
+}
+
+static void setAnalysisSettings(Transform& transform)
+{
+    const auto analysisSettings = getAnalysisSettingsFromSettings();
+
+    if (analysisSettings.count("precision-analysis") > 0) {
+        bool precise = analysisSettings.at("precision-analysis");
+        if (precise) {
+            cerr << "setting parameters for precise mode" << endl;
+            transform.setParameter("precisetime", 1);
+        }
+        else {
+            cerr << "setting parameters for vague mode" << endl;
+            transform.setParameter("precisetime", 0);
+        }
+    }
+
+    if (analysisSettings.count("lowamp-analysis") > 0) {
+        bool lowamp = analysisSettings.at("lowamp-analysis");
+        if (lowamp) {
+            cerr << "setting parameters for lowamp suppression" << endl;
+            transform.setParameter("lowampsuppression", 0.2f);
+        }
+        else {
+            cerr << "setting parameters for no lowamp suppression" << endl;
+            transform.setParameter("lowampsuppression", 0.0f);
+        }
+    }
+
+    if (analysisSettings.count("onset-analysis") > 0) {
+        bool onset = analysisSettings.at("onset-analysis");
+        if (onset) {
+            cerr << "setting parameters for increased onset sensitivity" << endl;
+            transform.setParameter("onsetsensitivity", 0.7f);
+        }
+        else {
+            cerr << "setting parameters for non-increased onset sensitivity" << endl;
+            transform.setParameter("onsetsensitivity", 0.0f);
+        }
+    }
+
+    if (analysisSettings.count("prune-analysis") > 0) {
+        bool prune = analysisSettings.at("prune-analysis");
+        if (prune) {
+            cerr << "setting parameters for duration pruning" << endl;
+            transform.setParameter("prunethresh", 0.1f);
+        }
+        else {
+            cerr << "setting parameters for no duration pruning" << endl;
+            transform.setParameter("prunethresh", 0.0f);
+        }
+    }
+}
+
 QString
 Analyser::addAnalyses()
 {
@@ -401,11 +471,6 @@ Analyser::addAnalyses()
 
     TransformFactory *tf = TransformFactory::getInstance();
 
-    QString plugname = "pYIN";
-    QString base = "vamp:pyin:pyin:";
-    QString f0out = "smoothedpitchtrack";
-    QString noteout = "notes";
-
     Transforms transforms;
 
 /*!!! we could have more than one pitch track...
@@ -419,80 +484,27 @@ Analyser::addAnalyses()
         m_document->addLayerToView(m_pane, lx);
     }
 */
+    auto f0_transform = QString(PYIN_TRANSFORM_BASE) + QString(PYIN_F0_OUT);
+    auto note_transform = QString(PYIN_TRANSFORM_BASE) + QString(PYIN_NOTE_OUT);
 
     QString notFound = tr("Transform \"%1\" not found. Unable to analyse audio file.<br><br>Is the %2 Vamp plugin correctly installed?");
-    if (!tf->haveTransform(base + f0out)) {
-        return notFound.arg(base + f0out).arg(plugname);
+    if (!tf->haveTransform(f0_transform)) {
+        return notFound.arg(f0_transform).arg(PYIN_PLUGIN_NAME);
     }
-    if (!tf->haveTransform(base + noteout)) {
-        return notFound.arg(base + noteout).arg(plugname);
+    if (!tf->haveTransform(note_transform)) {
+        return notFound.arg(note_transform).arg(PYIN_PLUGIN_NAME);
     }
-
-    QSettings settings;
-    settings.beginGroup("Analyser");
-
-    bool precise = false, lowamp = true, onset = true, prune = true;
-
-    std::map<QString, bool &> flags {
-        { "precision-analysis", precise },
-        { "lowamp-analysis", lowamp },
-        { "onset-analysis", onset },
-        { "prune-analysis", prune }
-    };
-
-    auto keyMap = getAnalysisSettings();
-
-    for (auto p: flags) {
-        auto ki = keyMap.find(p.first);
-        if (ki != keyMap.end()) {
-            p.second = settings.value(ki->first, ki->second).toBool();
-        } else {
-            throw std::logic_error("Internal error: One or more analysis settings keys not found in map: check addAnalyses and getAnalysisSettings");
-        }
-    }
-
-    settings.endGroup();
 
     Transform t = tf->getDefaultTransformFor
-        (base + f0out, waveFileModel->getSampleRate());
+        (f0_transform, waveFileModel->getSampleRate());
     t.setStepSize(256);
     t.setBlockSize(2048);
 
-    if (precise) {
-        cerr << "setting parameters for precise mode" << endl;
-        t.setParameter("precisetime", 1);
-    } else {
-        cerr << "setting parameters for vague mode" << endl;
-        t.setParameter("precisetime", 0);
-    }
-
-    if (lowamp) {
-        cerr << "setting parameters for lowamp suppression" << endl;
-        t.setParameter("lowampsuppression", 0.2f);
-    } else {
-        cerr << "setting parameters for no lowamp suppression" << endl;
-        t.setParameter("lowampsuppression", 0.0f);
-    }
-
-    if (onset) {
-        cerr << "setting parameters for increased onset sensitivity" << endl;
-        t.setParameter("onsetsensitivity", 0.7f);
-    } else {
-        cerr << "setting parameters for non-increased onset sensitivity" << endl;
-        t.setParameter("onsetsensitivity", 0.0f);
-    }
-
-    if (prune) {
-        cerr << "setting parameters for duration pruning" << endl;
-        t.setParameter("prunethresh", 0.1f);
-    } else {
-        cerr << "setting parameters for no duration pruning" << endl;
-        t.setParameter("prunethresh", 0.0f);
-    }
+    setAnalysisSettings(t);
 
     transforms.push_back(t);
 
-    t.setOutput(noteout);
+    t.setOutput(PYIN_NOTE_OUT);
 
     transforms.push_back(t);
 
@@ -504,8 +516,12 @@ Analyser::addAnalyses()
         FlexiNoteLayer *f = qobject_cast<FlexiNoteLayer *>(layers[i]);
         TimeValueLayer *t = qobject_cast<TimeValueLayer *>(layers[i]);
 
-        if (f) m_layers[Notes] = f;
-        if (t) m_layers[PitchTrack] = t;
+        if (f) {
+            m_layers[Notes] = f;
+        }
+        else if (t) {
+            m_layers[PitchTrack] = t;
+        }
 
         m_document->addLayerToView(m_pane, layers[i]);
     }
@@ -623,15 +639,13 @@ Analyser::analyseRecording(Selection sel)
 {
     QMutexLocker locker(&m_asyncMutex);
 
-    FrequencyRange range = FrequencyRange();
-
     auto waveFileModel = ModelById::getAs<WaveFileModel>(m_fileModel);
     if (!waveFileModel) {
-        return "Internal error: Analyser::reAnalyseSelection() called with no model present";
+        return "Internal error: Analyser::analyseRecording() called with no model present";
     }
 
     if (!m_reAnalysingSelection.isEmpty()) {
-        if (sel == m_reAnalysingSelection && range == m_reAnalysingRange) {
+        if (sel == m_reAnalysingSelection) {
             cerr << "selection & range are same as current analysis, ignoring" << endl;
             return "";
         }
@@ -640,60 +654,35 @@ Analyser::analyseRecording(Selection sel)
     if (sel.isEmpty()) return "";
 
     m_reAnalysingSelection = sel;
-    m_reAnalysingRange = range;
 
-    m_preAnalysis = Clipboard();
     auto* pitchLayer = qobject_cast<TimeValueLayer*>(m_layers[PitchTrack]);
-    if (pitchLayer) {
-        pitchLayer->copy(m_pane, sel, m_preAnalysis);
-    }
     auto* noteLayer = qobject_cast<FlexiNoteLayer*>(m_layers[Notes]);
 
     TransformFactory* tf = TransformFactory::getInstance();
 
-    QString plugname1 = "pYIN";
-
-    QString base = "vamp:pyin:pyin:";
-    QString f0out = "smoothedpitchtrack";
-    QString noteout = "notes";
-
     Transforms transforms;
 
+    auto f0_transform = QString(PYIN_TRANSFORM_BASE) + QString(PYIN_F0_OUT);
+    auto note_transform = QString(PYIN_TRANSFORM_BASE) + QString(PYIN_NOTE_OUT);
+
     QString notFound = tr("Transform \"%1\" not found. Unable to perform interactive analysis.<br><br>Are the %2 and %3 Vamp plugins correctly installed?");
-    if (!tf->haveTransform(base + f0out)) {
-        return notFound.arg(base + f0out).arg(plugname1);
+    if (!tf->haveTransform(f0_transform)) {
+        return notFound.arg(f0_transform).arg(PYIN_PLUGIN_NAME);
     }
 
-    if (!tf->haveTransform(base + noteout)) {
-        return notFound.arg(base + noteout).arg(plugname1);
+    if (!tf->haveTransform(note_transform)) {
+        return notFound.arg(note_transform).arg(PYIN_PLUGIN_NAME);
     }
 
     Transform t = tf->getDefaultTransformFor
-        (base + f0out, waveFileModel->getSampleRate());
+        (f0_transform, waveFileModel->getSampleRate());
     t.setStepSize(256);
     t.setBlockSize(2048);
 
-    if (range.isConstrained()) {
-        t.setParameter("minfreq", float(range.min));
-        t.setParameter("maxfreq", float(range.max));
-        t.setBlockSize(4096);
-    }
-
-    // get time stamps that align with the 256-sample grid of the original extraction
-    const sv_frame_t grid = 256;
-    sv_frame_t startSample = (sel.getStartFrame() / grid) * grid;
-    if (startSample < sel.getStartFrame()) startSample += grid;
-    sv_frame_t endSample = (sel.getEndFrame() / grid) * grid;
-    if (endSample < sel.getEndFrame()) endSample += grid;
-    if (!range.isConstrained()) {
-        startSample -= 4 * grid; // 4*256 is for 4 frames offset due to timestamp shift
-        endSample -= 4 * grid;
-    }
-    else {
-        endSample -= 9 * grid; // MM says: not sure what the CHP plugin does there
-    }
-    RealTime start = RealTime::frame2RealTime(startSample, waveFileModel->getSampleRate());
-    RealTime end = RealTime::frame2RealTime(endSample, waveFileModel->getSampleRate());
+    setAnalysisSettings(t);
+  
+    RealTime start = RealTime::frame2RealTime(sel.getStartFrame(), waveFileModel->getSampleRate());
+    RealTime end = RealTime::frame2RealTime(sel.getEndFrame(), waveFileModel->getSampleRate());
 
     RealTime duration;
 
@@ -701,10 +690,10 @@ Analyser::analyseRecording(Selection sel)
         duration = end - start;
     }
 
-    cerr << "Analyser::reAnalyseSelection: start " << start << " end " << end << " original selection start " << sel.getStartFrame() << " end " << sel.getEndFrame() << " duration " << duration << endl;
+    cerr << "Analyser::analyseRecording: start " << start << " end " << end << " original selection start " << sel.getStartFrame() << " end " << sel.getEndFrame() << " duration " << duration << endl;
 
     if (duration <= RealTime::zeroTime) {
-        cerr << "Analyser::reAnalyseSelection: duration <= 0, not analysing" << endl;
+        cerr << "Analyser::analyseRecording: duration <= 0, not analysing" << endl;
         return "";
     }
 
@@ -713,7 +702,7 @@ Analyser::analyseRecording(Selection sel)
 
     transforms.push_back(t);
 
-    t.setOutput(noteout);
+    t.setOutput(PYIN_NOTE_OUT);
 
     transforms.push_back(t);
 
@@ -785,13 +774,11 @@ Analyser::reAnalyseSelection(Selection sel, FrequencyRange range)
 
     TransformFactory *tf = TransformFactory::getInstance();
 
-    QString plugname1 = "pYIN";
     QString plugname2 = "CHP";
 
     QString base = "vamp:pyin:localcandidatepyin:";
     QString out = "pitchtrackcandidates";
-    QString f0out = "smoothedpitchtrack";
-    QString noteout = "notes";
+
 
     if (range.isConstrained()) {
         base = "vamp:chp:constrainedharmonicpeak:";
@@ -802,15 +789,7 @@ Analyser::reAnalyseSelection(Selection sel, FrequencyRange range)
 
     QString notFound = tr("Transform \"%1\" not found. Unable to perform interactive analysis.<br><br>Are the %2 and %3 Vamp plugins correctly installed?");
     if (!tf->haveTransform(base + out)) {
-        return notFound.arg(base + out).arg(plugname1).arg(plugname2);
-    }
-
-    if (!tf->haveTransform(base + f0out)) {
-        return notFound.arg(base + f0out).arg(plugname1).arg(plugname2);
-    }
-
-    if (!tf->haveTransform(base + noteout)) {
-        return notFound.arg(base + noteout).arg(plugname1).arg(plugname2);
+        return notFound.arg(base + out).arg(PYIN_PLUGIN_NAME).arg(plugname2);
     }
        
     Transform t = tf->getDefaultTransformFor

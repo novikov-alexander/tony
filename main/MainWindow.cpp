@@ -3084,7 +3084,7 @@ MainWindow::analyseDuringRecordingRunner()
 void
 MainWindow::analyseDuringRecording()
 {
-    int duration_ms = 200;
+    constexpr int duration_ms = 100;
 
     m_analyser->analyseRecordingToEnd(m_recordTarget->getRecordDuration());
     

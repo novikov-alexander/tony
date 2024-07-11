@@ -279,6 +279,14 @@ protected:
 
     void saveState(Component c) const;
     void loadState(Component c);
+
+    // TODO (alnovi): Move constexpression to a static class
+    static constexpr const char* PYIN_PLUGIN_NAME = "pYIN";
+    static constexpr const char* PYIN_TRANSFORM_BASE = "vamp:pyin:pyin:";
+    static constexpr const char* PYIN_F0_OUT = "smoothedpitchtrack";
+    static constexpr const char* PYIN_NOTE_OUT = "notes";
+
+
 };
 
 #endif
