@@ -607,13 +607,13 @@ void processLayer(LayerType* layer, LayerType* targetLayer, std::function<EventV
 }
 
 // Custom processing logic for FlexiNoteLayer
-static EventVector processNoteModel(sv_frame_t context_start, std::shared_ptr<NoteModel> fromModel, std::shared_ptr<NoteModel> toModel) {
+static EventVector processNoteModel(sv_frame_t contextStart, std::shared_ptr<NoteModel> fromModel, std::shared_ptr<NoteModel> toModel) {
     auto allEvents = toModel->getAllEvents();
     auto points = fromModel->getAllEvents();
 
     // Vamp doesn't add current timestamp for note features, so, do it manually
     std::transform(points.begin(), points.end(), points.begin(), [&](const auto& point) {
-        return point.withFrame(point.getFrame() + context_start);
+        return point.withFrame(point.getFrame() + contextStart);
     });
 
     if (!allEvents.empty() && !points.empty()) {
@@ -626,7 +626,7 @@ static EventVector processNoteModel(sv_frame_t context_start, std::shared_ptr<No
             auto overlapDuration = prevEvent.getFrame() + prevEvent.getDuration() - nextEvent.getFrame();
             points[0] = prevEvent.withDuration(overallDuration - overlapDuration);
             
-            // TODO (alnovi): remove all events from toModel which ends after context_start
+            // TODO (alnovi): remove all events from toModel which ends after contextStart
             toModel->remove(prevEvent);
         }
     }
@@ -718,7 +718,7 @@ Analyser::analyseRecording(Selection sel)
         if (tempPitchLayer) {
             setBaseColour(tempPitchLayer, tr("Black"), cdb);
             processLayer<TimeValueLayer, SparseTimeValueModel>(tempPitchLayer, pitchLayer, [](std::shared_ptr<SparseTimeValueModel> model, std::shared_ptr<SparseTimeValueModel>) {
-                // No additional custom processing needed for TimeValueLayer
+                // TODO (alnovi): remove all events from toModel which ends after contextStart
                 return model->getAllEvents();
             });
         }
