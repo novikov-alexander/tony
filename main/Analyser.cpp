@@ -656,6 +656,63 @@ void processLayer(LayerType* layer, LayerType* targetLayer, sv::Document* docume
         });
 }
 
+// Custom processing logic for pitch track (SparseTimeValueModel)
+static EventVector processPitchModel(sv_frame_t contextStart, std::shared_ptr<SparseTimeValueModel> fromModel, std::shared_ptr<SparseTimeValueModel> toModel) {
+    auto allEvents = toModel->getAllEvents();
+    auto points = fromModel->getAllEvents();
+
+    // Add context start timestamp to all points from the new analysis
+    std::transform(points.begin(), points.end(), points.begin(), [&](const auto& point) {
+        return point.withFrame(point.getFrame() + contextStart);
+    });
+
+    // Remove all events from toModel that extend beyond contextStart to prevent overlaps
+    EventVector eventsToRemove;
+    for (const auto& event : allEvents) {
+        if (event.getFrame() >= contextStart) {
+            eventsToRemove.push_back(event);
+        }
+    }
+    
+    for (const auto& event : eventsToRemove) {
+        toModel->remove(event);
+    }
+
+    // After cleanup, get the remaining events for overlap processing
+    allEvents = toModel->getAllEvents();
+
+    // Handle potential overlaps between the last existing event and first new event
+    if (!allEvents.empty() && !points.empty()) {
+        auto& lastExistingEvent = allEvents.back();
+        auto& firstNewEvent = points.front();
+
+        // Check if there's a gap or overlap between last existing and first new event
+        auto gapFrames = firstNewEvent.getFrame() - lastExistingEvent.getFrame();
+        
+        // If events are very close (within ~11ms at 44.1kHz), interpolate between them
+        const sv_frame_t interpolationThreshold = 512; // ~11ms at 44.1kHz
+        
+        if (gapFrames > 0 && gapFrames <= interpolationThreshold) {
+            // Small gap - add interpolated point if pitch values are similar
+            if (lastExistingEvent.hasValue() && firstNewEvent.hasValue()) {
+                auto lastValue = lastExistingEvent.getValue();
+                auto firstValue = firstNewEvent.getValue();
+                auto valueDiff = std::abs(lastValue - firstValue) / lastValue;
+                
+                // Only interpolate if pitch values are within 10% of each other
+                if (valueDiff <= 0.1) {
+                    auto midFrame = lastExistingEvent.getFrame() + gapFrames / 2;
+                    auto midValue = (lastValue + firstValue) / 2.0;
+                    Event interpolatedEvent = Event(midFrame, midValue, "interpolated");
+                    toModel->add(interpolatedEvent);
+                }
+            }
+        }
+    }
+
+    return points;
+}
+
 // Custom processing logic for FlexiNoteLayer
 static EventVector processNoteModel(sv_frame_t contextStart, std::shared_ptr<NoteModel> fromModel, std::shared_ptr<NoteModel> toModel) {
     auto allEvents = toModel->getAllEvents();
@@ -666,18 +723,52 @@ static EventVector processNoteModel(sv_frame_t contextStart, std::shared_ptr<Not
         return point.withFrame(point.getFrame() + contextStart);
     });
 
+    // Remove all events from toModel which end after contextStart to prevent overlaps
+    EventVector eventsToRemove;
+    for (const auto& event : allEvents) {
+        if (event.getFrame() + event.getDuration() > contextStart) {
+            eventsToRemove.push_back(event);
+        }
+    }
+    
+    for (const auto& event : eventsToRemove) {
+        toModel->remove(event);
+    }
+
+    // After cleanup, get the remaining events for overlap processing
+    allEvents = toModel->getAllEvents();
+
     if (!allEvents.empty() && !points.empty()) {
         auto& prevEvent = allEvents.back();
         auto& nextEvent = points.front();
 
-        // Merge events but don't be too greedy
-        if (nextEvent.getFrame() < prevEvent.getFrame() + prevEvent.getDuration() && nextEvent.getFrame() > prevEvent.getFrame()) {
-            auto overallDuration = prevEvent.getDuration() + nextEvent.getDuration();
-            auto overlapDuration = prevEvent.getFrame() + prevEvent.getDuration() - nextEvent.getFrame();
-            points[0] = prevEvent.withDuration(overallDuration - overlapDuration);
+        // Handle various overlap scenarios
+        if (nextEvent.getFrame() >= prevEvent.getFrame() && 
+            nextEvent.getFrame() < prevEvent.getFrame() + prevEvent.getDuration()) {
             
-            // TODO (alnovi): remove all events from toModel which ends after contextStart
-            toModel->remove(prevEvent);
+            // Calculate overlap parameters
+            auto prevEnd = prevEvent.getFrame() + prevEvent.getDuration();
+            auto nextEnd = nextEvent.getFrame() + nextEvent.getDuration();
+            auto overlapStart = nextEvent.getFrame();
+            auto overlapDuration = std::min(prevEnd, nextEnd) - overlapStart;
+            
+            // Choose merge strategy based on overlap characteristics
+            if (overlapDuration < prevEvent.getDuration() * 0.5 && 
+                overlapDuration < nextEvent.getDuration() * 0.5) {
+                // Small overlap: merge by extending the earlier event
+                auto mergedDuration = nextEnd - prevEvent.getFrame();
+                points[0] = prevEvent.withDuration(mergedDuration);
+                toModel->remove(prevEvent);
+            } else {
+                // Significant overlap: keep the longer event, adjust timing
+                if (prevEvent.getDuration() > nextEvent.getDuration()) {
+                    // Keep previous event, adjust next event start
+                    points[0] = nextEvent.withFrame(prevEnd);
+                } else {
+                    // Keep next event, remove previous
+                    toModel->remove(prevEvent);
+                }
+            }
         }
     }
 
@@ -772,10 +863,7 @@ Analyser::analyseRecording(Selection sel)
 
         if (tempPitchLayer) {
             setBaseColour(tempPitchLayer, tr("Black"), cdb);
-            processLayer<TimeValueLayer, SparseTimeValueModel>(tempPitchLayer, pitchLayer, m_document, m_pane, &m_realtimeAnalysisLayers, [](std::shared_ptr<SparseTimeValueModel> model, std::shared_ptr<SparseTimeValueModel>) {
-                // TODO (alnovi): remove all events from toModel which ends after contextStart
-                return model->getAllEvents();
-            });
+            processLayer<TimeValueLayer, SparseTimeValueModel>(tempPitchLayer, pitchLayer, m_document, m_pane, &m_realtimeAnalysisLayers, std::bind(processPitchModel, sel.getStartFrame(), std::placeholders::_1, std::placeholders::_2));
         }
 
         if (tempNoteLayer) {
