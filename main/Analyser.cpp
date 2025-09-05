@@ -69,6 +69,16 @@ Analyser::Analyser() :
 
 Analyser::~Analyser()
 {
+    // Clean up any remaining realtime analysis layers
+    if (m_document && m_pane) {
+        for (auto* layer : m_realtimeAnalysisLayers) {
+            if (layer) {
+                m_document->removeLayerFromView(m_pane, layer);
+                m_document->deleteLayer(layer);
+            }
+        }
+    }
+    m_realtimeAnalysisLayers.clear();
 }
 
 std::map<QString, QVariant>
@@ -192,6 +202,18 @@ void
 Analyser::fileClosed()
 {
     cerr << "Analyser::fileClosed" << endl;
+    
+    // Clean up any remaining realtime analysis layers
+    if (m_document && m_pane) {
+        for (auto* layer : m_realtimeAnalysisLayers) {
+            if (layer) {
+                m_document->removeLayerFromView(m_pane, layer);
+                m_document->deleteLayer(layer);
+            }
+        }
+    }
+    m_realtimeAnalysisLayers.clear();
+    
     m_layers.clear();
     m_reAnalysisCandidates.clear();
     m_currentCandidate = -1;
@@ -603,8 +625,8 @@ void setBaseColour(LayerType* layer, const QString& colourName, ColourDatabase* 
 
 // Generalized helper function to process layers
 template <typename LayerType, typename ModelType>
-void processLayer(LayerType* layer, LayerType* targetLayer, std::function<EventVector(std::shared_ptr<ModelType>, std::shared_ptr<ModelType>)> customProcessing) {
-    QObject::connect(layer, &TimeValueLayer::modelCompletionChanged, [layer, targetLayer, customProcessing](ModelId modelId) {
+void processLayer(LayerType* layer, LayerType* targetLayer, sv::Document* document, sv::Pane* pane, std::vector<sv::Layer*>* trackingVector, std::function<EventVector(std::shared_ptr<ModelType>, std::shared_ptr<ModelType>)> customProcessing) {
+    QObject::connect(layer, &LayerType::modelCompletionChanged, [layer, targetLayer, document, pane, trackingVector, customProcessing](ModelId modelId) {
         auto model = ModelById::getAs<ModelType>(modelId);
 
         if (model->getCompletion() == 100) {
@@ -618,8 +640,18 @@ void processLayer(LayerType* layer, LayerType* targetLayer, std::function<EventV
                 toModel->add(p);
             }
 
-            QObject::disconnect(layer, &TimeValueLayer::modelCompletionChanged, nullptr, nullptr);
-            // TODO (alnovi): remove the layer.
+            QObject::disconnect(layer, &LayerType::modelCompletionChanged, nullptr, nullptr);
+            
+            // Clean up the temporary layer
+            if (document && pane) {
+                document->removeLayerFromView(pane, layer);
+                document->deleteLayer(layer);
+            }
+            
+            // Remove from tracking vector
+            if (trackingVector) {
+                trackingVector->erase(std::remove(trackingVector->begin(), trackingVector->end(), layer), trackingVector->end());
+            }
         }
         });
 }
@@ -728,6 +760,11 @@ Analyser::analyseRecording(Selection sel)
 
     ColourDatabase* cdb = ColourDatabase::getInstance();
 
+    // Track the temporary layers for cleanup
+    for (auto* layer : layers) {
+        m_realtimeAnalysisLayers.push_back(layer);
+    }
+
     for (auto* layer : layers) {
 
         FlexiNoteLayer* tempNoteLayer = qobject_cast<FlexiNoteLayer*>(layer);
@@ -735,7 +772,7 @@ Analyser::analyseRecording(Selection sel)
 
         if (tempPitchLayer) {
             setBaseColour(tempPitchLayer, tr("Black"), cdb);
-            processLayer<TimeValueLayer, SparseTimeValueModel>(tempPitchLayer, pitchLayer, [](std::shared_ptr<SparseTimeValueModel> model, std::shared_ptr<SparseTimeValueModel>) {
+            processLayer<TimeValueLayer, SparseTimeValueModel>(tempPitchLayer, pitchLayer, m_document, m_pane, &m_realtimeAnalysisLayers, [](std::shared_ptr<SparseTimeValueModel> model, std::shared_ptr<SparseTimeValueModel>) {
                 // TODO (alnovi): remove all events from toModel which ends after contextStart
                 return model->getAllEvents();
             });
@@ -743,7 +780,7 @@ Analyser::analyseRecording(Selection sel)
 
         if (tempNoteLayer) {
             setBaseColour(tempNoteLayer, tr("Bright Blue"), cdb);
-            processLayer<FlexiNoteLayer, NoteModel>(tempNoteLayer, noteLayer, std::bind(processNoteModel, sel.getStartFrame(), std::placeholders::_1, std::placeholders::_2));
+            processLayer<FlexiNoteLayer, NoteModel>(tempNoteLayer, noteLayer, m_document, m_pane, &m_realtimeAnalysisLayers, std::bind(processNoteModel, sel.getStartFrame(), std::placeholders::_1, std::placeholders::_2));
         }
     }
   

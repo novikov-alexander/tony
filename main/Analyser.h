@@ -262,6 +262,7 @@ protected:
     sv::sv_frame_t m_analysedFrames = 0;
     FrequencyRange m_reAnalysingRange;
     std::vector<sv::Layer *> m_reAnalysisCandidates;
+    std::vector<sv::Layer *> m_realtimeAnalysisLayers;  // Track temporary layers for cleanup
     int m_currentCandidate;
     bool m_candidatesVisible;
     sv::Document::LayerCreationAsyncHandle m_currentAsyncHandle;
