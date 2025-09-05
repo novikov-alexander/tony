@@ -713,58 +713,186 @@ static EventVector processPitchModel(sv_frame_t contextStart, std::shared_ptr<Sp
     return points;
 }
 
-// Helper function to calculate weighted frequency from overlapping notes
-static float calculateWeightedFrequency(const Event& prevEvent, const Event& nextEvent, 
-                                       sv_frame_t overlapStart, sv_frame_t overlapDuration) {
-    // Extract frequencies from both events
-    float prevFreq = prevEvent.hasValue() ? prevEvent.getValue() : 0.0f;
-    float nextFreq = nextEvent.hasValue() ? nextEvent.getValue() : 0.0f;
+// Structure to represent a group of overlapping events
+struct OverlapGroup {
+    EventVector events;
+    sv_frame_t startFrame;
+    sv_frame_t endFrame;
     
-    // If either frequency is invalid, use the valid one
-    if (prevFreq <= 0.0f && nextFreq > 0.0f) return nextFreq;
-    if (nextFreq <= 0.0f && prevFreq > 0.0f) return prevFreq;
-    if (prevFreq <= 0.0f && nextFreq <= 0.0f) return 0.0f;
+    OverlapGroup(const EventVector& evts) : events(evts) {
+        if (!events.empty()) {
+            startFrame = events.front().getFrame();
+            endFrame = events.front().getFrame() + events.front().getDuration();
+            
+            for (const auto& event : events) {
+                startFrame = std::min(startFrame, event.getFrame());
+                endFrame = std::max(endFrame, event.getFrame() + event.getDuration());
+            }
+        } else {
+            startFrame = endFrame = 0;
+        }
+    }
+};
+
+// Helper function to find all overlap groups among a set of events
+static std::vector<OverlapGroup> findOverlapGroups(const EventVector& events) {
+    std::vector<OverlapGroup> groups;
+    std::vector<bool> processed(events.size(), false);
     
-    // Calculate duration-based weights for each event's contribution to overlap
-    auto prevStart = prevEvent.getFrame();
-    auto prevEnd = prevEvent.getFrame() + prevEvent.getDuration();
-    auto nextStart = nextEvent.getFrame();
-    auto nextEnd = nextEvent.getFrame() + nextEvent.getDuration();
-    auto overlapEnd = overlapStart + overlapDuration;
-    
-    // Calculate overlapping portions for each event
-    auto prevOverlapStart = std::max(prevStart, overlapStart);
-    auto prevOverlapEnd = std::min(prevEnd, overlapEnd);
-    auto prevOverlapContrib = std::max(0LL, prevOverlapEnd - prevOverlapStart);
-    
-    auto nextOverlapStart = std::max(nextStart, overlapStart);
-    auto nextOverlapEnd = std::min(nextEnd, overlapEnd);
-    auto nextOverlapContrib = std::max(0LL, nextOverlapEnd - nextOverlapStart);
-    
-    // Calculate weights based on duration contributions
-    double totalContrib = prevOverlapContrib + nextOverlapContrib;
-    if (totalContrib <= 0) {
-        // Fallback to simple average if no clear contribution
-        return (prevFreq + nextFreq) / 2.0f;
+    for (size_t i = 0; i < events.size(); ++i) {
+        if (processed[i]) continue;
+        
+        EventVector currentGroup;
+        currentGroup.push_back(events[i]);
+        processed[i] = true;
+        
+        // Find all events that overlap with any event in the current group
+        bool foundOverlap;
+        do {
+            foundOverlap = false;
+            for (size_t j = 0; j < events.size(); ++j) {
+                if (processed[j]) continue;
+                
+                // Check if event j overlaps with any event in the current group
+                for (const auto& groupEvent : currentGroup) {
+                    auto eventStart = events[j].getFrame();
+                    auto eventEnd = events[j].getFrame() + events[j].getDuration();
+                    auto groupStart = groupEvent.getFrame();
+                    auto groupEnd = groupEvent.getFrame() + groupEvent.getDuration();
+                    
+                    // Check for temporal overlap
+                    if (eventStart < groupEnd && eventEnd > groupStart) {
+                        currentGroup.push_back(events[j]);
+                        processed[j] = true;
+                        foundOverlap = true;
+                        break;
+                    }
+                }
+                if (foundOverlap) break;
+            }
+        } while (foundOverlap);
+        
+        // Only create groups for actual overlaps (more than one event)
+        if (currentGroup.size() > 1) {
+            groups.emplace_back(currentGroup);
+        }
     }
     
-    double prevWeight = prevOverlapContrib / totalContrib;
-    double nextWeight = nextOverlapContrib / totalContrib;
-    
-    // Calculate weighted frequency - use logarithmic averaging for better musical accuracy
-    if (prevFreq > 0.0f && nextFreq > 0.0f) {
-        // Geometric mean weighted by duration (better for frequency averaging)
-        double logPrevFreq = std::log(prevFreq);
-        double logNextFreq = std::log(nextFreq);
-        double weightedLogFreq = logPrevFreq * prevWeight + logNextFreq * nextWeight;
-        return std::exp(weightedLogFreq);
-    } else {
-        // Linear average for edge cases
-        return prevFreq * prevWeight + nextFreq * nextWeight;
-    }
+    return groups;
 }
 
-// Custom processing logic for FlexiNoteLayer
+// Enhanced helper function to calculate weighted frequency from multiple overlapping notes
+static float calculateWeightedFrequency(const EventVector& overlappingEvents, 
+                                       sv_frame_t overlapStart, sv_frame_t overlapDuration) {
+    if (overlappingEvents.empty()) return 0.0f;
+    if (overlappingEvents.size() == 1) {
+        return overlappingEvents[0].hasValue() ? overlappingEvents[0].getValue() : 0.0f;
+    }
+    
+    // Calculate weighted contributions from all events
+    std::vector<float> frequencies;
+    std::vector<double> weights;
+    auto overlapEnd = overlapStart + overlapDuration;
+    
+    for (const auto& event : overlappingEvents) {
+        float freq = event.hasValue() ? event.getValue() : 0.0f;
+        if (freq <= 0.0f) continue; // Skip invalid frequencies
+        
+        // Calculate this event's contribution to the overlap
+        auto eventStart = event.getFrame();
+        auto eventEnd = event.getFrame() + event.getDuration();
+        
+        auto eventOverlapStart = std::max(eventStart, overlapStart);
+        auto eventOverlapEnd = std::min(eventEnd, overlapEnd);
+        auto eventOverlapContrib = std::max(0LL, eventOverlapEnd - eventOverlapStart);
+        
+        if (eventOverlapContrib > 0) {
+            frequencies.push_back(freq);
+            weights.push_back(static_cast<double>(eventOverlapContrib));
+        }
+    }
+    
+    if (frequencies.empty()) return 0.0f;
+    if (frequencies.size() == 1) return frequencies[0];
+    
+    // Normalize weights
+    double totalWeight = 0.0;
+    for (double weight : weights) totalWeight += weight;
+    if (totalWeight <= 0.0) {
+        // Fallback to simple geometric mean
+        double logSum = 0.0;
+        for (float freq : frequencies) {
+            logSum += std::log(freq);
+        }
+        return std::exp(logSum / frequencies.size());
+    }
+    
+    for (double& weight : weights) weight /= totalWeight;
+    
+    // Calculate weighted geometric mean for better musical accuracy
+    double weightedLogSum = 0.0;
+    for (size_t i = 0; i < frequencies.size(); ++i) {
+        weightedLogSum += std::log(frequencies[i]) * weights[i];
+    }
+    
+    return std::exp(weightedLogSum);
+}
+
+// Helper function to merge a group of overlapping events into a single event
+static Event mergeOverlapGroup(const OverlapGroup& group) {
+    if (group.events.empty()) {
+        return Event(0, 0.0f, "");
+    }
+    
+    if (group.events.size() == 1) {
+        return group.events[0];
+    }
+    
+    // Calculate merged event properties
+    auto mergedStart = group.startFrame;
+    auto mergedEnd = group.endFrame;
+    auto mergedDuration = mergedEnd - mergedStart;
+    
+    // Calculate weighted frequency for the entire overlap
+    float weightedFreq = calculateWeightedFrequency(group.events, mergedStart, mergedDuration);
+    
+    // Use properties from the event with the longest duration as base
+    const Event* longestEvent = &group.events[0];
+    for (const auto& event : group.events) {
+        if (event.getDuration() > longestEvent->getDuration()) {
+            longestEvent = &event;
+        }
+    }
+    
+    // Create merged event
+    Event mergedEvent = longestEvent->withFrame(mergedStart)
+                                   .withDuration(mergedDuration);
+    
+    if (weightedFreq > 0.0f) {
+        mergedEvent = mergedEvent.withValue(weightedFreq);
+    }
+    
+    // Preserve label if available
+    if (longestEvent->hasLabel()) {
+        mergedEvent = mergedEvent.withLabel(longestEvent->getLabel());
+    }
+    
+    // Preserve level if available
+    if (longestEvent->hasLevel()) {
+        mergedEvent = mergedEvent.withLevel(longestEvent->getLevel());
+    }
+    
+    return mergedEvent;
+}
+
+// Legacy two-event version for backward compatibility
+static float calculateWeightedFrequency(const Event& prevEvent, const Event& nextEvent, 
+                                       sv_frame_t overlapStart, sv_frame_t overlapDuration) {
+    EventVector events = {prevEvent, nextEvent};
+    return calculateWeightedFrequency(events, overlapStart, overlapDuration);
+}
+
+// Enhanced custom processing logic for FlexiNoteLayer with multi-note overlap support
 static EventVector processNoteModel(sv_frame_t contextStart, std::shared_ptr<NoteModel> fromModel, std::shared_ptr<NoteModel> toModel) {
     auto allEvents = toModel->getAllEvents();
     auto points = fromModel->getAllEvents();
@@ -774,78 +902,117 @@ static EventVector processNoteModel(sv_frame_t contextStart, std::shared_ptr<Not
         return point.withFrame(point.getFrame() + contextStart);
     });
 
-    // Remove all events from toModel which end after contextStart to prevent overlaps
+    // Enhanced cleanup strategy: more intelligent overlap-aware removal
     EventVector eventsToRemove;
+    EventVector remainingEvents;
+    
+    // Identify events that might overlap with incoming analysis
     for (const auto& event : allEvents) {
-        if (event.getFrame() + event.getDuration() > contextStart) {
+        bool potentialOverlap = false;
+        for (const auto& newEvent : points) {
+            // Check if existing event could potentially overlap with any new event
+            auto existingStart = event.getFrame();
+            auto existingEnd = event.getFrame() + event.getDuration();
+            auto newStart = newEvent.getFrame();
+            auto newEnd = newEvent.getFrame() + newEvent.getDuration();
+            
+            if (existingStart < newEnd && existingEnd > newStart) {
+                potentialOverlap = true;
+                break;
+            }
+        }
+        
+        if (potentialOverlap) {
             eventsToRemove.push_back(event);
+        } else {
+            remainingEvents.push_back(event);
         }
     }
     
+    // Remove potentially overlapping events from the model
     for (const auto& event : eventsToRemove) {
         toModel->remove(event);
     }
 
-    // After cleanup, get the remaining events for overlap processing
-    allEvents = toModel->getAllEvents();
+    // Create combined event set for overlap detection
+    EventVector combinedEvents;
+    
+    // Add remaining non-overlapping events
+    for (const auto& event : remainingEvents) {
+        combinedEvents.push_back(event);
+    }
+    
+    // Add previously removed events that might need merging
+    for (const auto& event : eventsToRemove) {
+        combinedEvents.push_back(event);
+    }
+    
+    // Add new incoming events
+    for (const auto& event : points) {
+        combinedEvents.push_back(event);
+    }
 
-    if (!allEvents.empty() && !points.empty()) {
-        auto& prevEvent = allEvents.back();
-        auto& nextEvent = points.front();
+    // Find all overlap groups in the combined event set
+    auto overlapGroups = findOverlapGroups(combinedEvents);
 
-        // Handle various overlap scenarios
-        if (nextEvent.getFrame() >= prevEvent.getFrame() && 
-            nextEvent.getFrame() < prevEvent.getFrame() + prevEvent.getDuration()) {
-            
-            // Calculate overlap parameters
-            auto prevEnd = prevEvent.getFrame() + prevEvent.getDuration();
-            auto nextEnd = nextEvent.getFrame() + nextEvent.getDuration();
-            auto overlapStart = nextEvent.getFrame();
-            auto overlapDuration = std::min(prevEnd, nextEnd) - overlapStart;
-            
-            // Calculate weighted frequency for the merged event
-            float weightedFreq = calculateWeightedFrequency(prevEvent, nextEvent, overlapStart, overlapDuration);
-            
-            // Choose merge strategy based on overlap characteristics
-            if (overlapDuration < prevEvent.getDuration() * 0.5 && 
-                overlapDuration < nextEvent.getDuration() * 0.5) {
-                // Small overlap: merge by extending the earlier event with weighted frequency
-                auto mergedDuration = nextEnd - prevEvent.getFrame();
-                Event mergedEvent = prevEvent.withDuration(mergedDuration);
-                if (weightedFreq > 0.0f) {
-                    mergedEvent = mergedEvent.withValue(weightedFreq);
+    // Process each overlap group
+    EventVector finalEvents;
+    std::vector<bool> processed(combinedEvents.size(), false);
+    
+    // Process overlap groups first
+    for (const auto& group : overlapGroups) {
+        Event mergedEvent = mergeOverlapGroup(group);
+        finalEvents.push_back(mergedEvent);
+        
+        // Mark all events in this group as processed
+        for (const auto& groupEvent : group.events) {
+            for (size_t i = 0; i < combinedEvents.size(); ++i) {
+                if (!processed[i] && 
+                    combinedEvents[i].getFrame() == groupEvent.getFrame() &&
+                    combinedEvents[i].getDuration() == groupEvent.getDuration()) {
+                    processed[i] = true;
                 }
-                points[0] = mergedEvent;
-                toModel->remove(prevEvent);
-            } else {
-                // Significant overlap: create merged event with weighted frequency and optimal timing
-                auto mergedStart = prevEvent.getFrame();
-                auto mergedDuration = std::max(prevEnd, nextEnd) - mergedStart;
-                
-                // Use the event with better timing characteristics (earlier start)
-                Event mergedEvent = prevEvent.withDuration(mergedDuration);
-                if (weightedFreq > 0.0f) {
-                    mergedEvent = mergedEvent.withValue(weightedFreq);
-                }
-                
-                // Preserve additional properties from the longer event
-                if (nextEvent.getDuration() > prevEvent.getDuration()) {
-                    // Copy label and other properties from longer event if available
-                    if (nextEvent.hasLabel() && !prevEvent.hasLabel()) {
-                        mergedEvent = mergedEvent.withLabel(nextEvent.getLabel());
-                    }
-                    if (nextEvent.hasLevel() && !prevEvent.hasLevel()) {
-                        mergedEvent = mergedEvent.withLevel(nextEvent.getLevel());
-                    }
-                }
-                
-                points[0] = mergedEvent;
-                toModel->remove(prevEvent);
             }
         }
     }
+    
+    // Add non-overlapping events
+    for (size_t i = 0; i < combinedEvents.size(); ++i) {
+        if (!processed[i]) {
+            finalEvents.push_back(combinedEvents[i]);
+        }
+    }
 
-    return points;
+    // Filter to return only the new/modified events that should be added
+    EventVector resultEvents;
+    for (const auto& event : finalEvents) {
+        bool isNew = false;
+        
+        // Check if this event is derived from new analysis or is a merge result
+        for (const auto& originalNew : points) {
+            if (event.getFrame() >= originalNew.getFrame() - 1000 && // Allow some tolerance
+                event.getFrame() <= originalNew.getFrame() + originalNew.getDuration() + 1000) {
+                isNew = true;
+                break;
+            }
+        }
+        
+        // Also include events that are merge results (modified existing events)
+        bool isMergeResult = false;
+        for (const auto& removedEvent : eventsToRemove) {
+            if (event.getFrame() >= removedEvent.getFrame() - 1000 &&
+                event.getFrame() <= removedEvent.getFrame() + removedEvent.getDuration() + 1000) {
+                isMergeResult = true;
+                break;
+            }
+        }
+        
+        if (isNew || isMergeResult) {
+            resultEvents.push_back(event);
+        }
+    }
+
+    return resultEvents;
 }
 
 QString
