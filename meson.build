@@ -1021,6 +1021,7 @@ chp_plugin = shared_library(
 tony_main_files = [
   'main/main.cpp',
   'main/Analyser.cpp',
+  'main/OverlapProcessor.cpp',
   'main/MainWindow.cpp',
   'main/NetworkPermissionTester.cpp',
 ]
