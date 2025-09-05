@@ -713,6 +713,57 @@ static EventVector processPitchModel(sv_frame_t contextStart, std::shared_ptr<Sp
     return points;
 }
 
+// Helper function to calculate weighted frequency from overlapping notes
+static float calculateWeightedFrequency(const Event& prevEvent, const Event& nextEvent, 
+                                       sv_frame_t overlapStart, sv_frame_t overlapDuration) {
+    // Extract frequencies from both events
+    float prevFreq = prevEvent.hasValue() ? prevEvent.getValue() : 0.0f;
+    float nextFreq = nextEvent.hasValue() ? nextEvent.getValue() : 0.0f;
+    
+    // If either frequency is invalid, use the valid one
+    if (prevFreq <= 0.0f && nextFreq > 0.0f) return nextFreq;
+    if (nextFreq <= 0.0f && prevFreq > 0.0f) return prevFreq;
+    if (prevFreq <= 0.0f && nextFreq <= 0.0f) return 0.0f;
+    
+    // Calculate duration-based weights for each event's contribution to overlap
+    auto prevStart = prevEvent.getFrame();
+    auto prevEnd = prevEvent.getFrame() + prevEvent.getDuration();
+    auto nextStart = nextEvent.getFrame();
+    auto nextEnd = nextEvent.getFrame() + nextEvent.getDuration();
+    auto overlapEnd = overlapStart + overlapDuration;
+    
+    // Calculate overlapping portions for each event
+    auto prevOverlapStart = std::max(prevStart, overlapStart);
+    auto prevOverlapEnd = std::min(prevEnd, overlapEnd);
+    auto prevOverlapContrib = std::max(0LL, prevOverlapEnd - prevOverlapStart);
+    
+    auto nextOverlapStart = std::max(nextStart, overlapStart);
+    auto nextOverlapEnd = std::min(nextEnd, overlapEnd);
+    auto nextOverlapContrib = std::max(0LL, nextOverlapEnd - nextOverlapStart);
+    
+    // Calculate weights based on duration contributions
+    double totalContrib = prevOverlapContrib + nextOverlapContrib;
+    if (totalContrib <= 0) {
+        // Fallback to simple average if no clear contribution
+        return (prevFreq + nextFreq) / 2.0f;
+    }
+    
+    double prevWeight = prevOverlapContrib / totalContrib;
+    double nextWeight = nextOverlapContrib / totalContrib;
+    
+    // Calculate weighted frequency - use logarithmic averaging for better musical accuracy
+    if (prevFreq > 0.0f && nextFreq > 0.0f) {
+        // Geometric mean weighted by duration (better for frequency averaging)
+        double logPrevFreq = std::log(prevFreq);
+        double logNextFreq = std::log(nextFreq);
+        double weightedLogFreq = logPrevFreq * prevWeight + logNextFreq * nextWeight;
+        return std::exp(weightedLogFreq);
+    } else {
+        // Linear average for edge cases
+        return prevFreq * prevWeight + nextFreq * nextWeight;
+    }
+}
+
 // Custom processing logic for FlexiNoteLayer
 static EventVector processNoteModel(sv_frame_t contextStart, std::shared_ptr<NoteModel> fromModel, std::shared_ptr<NoteModel> toModel) {
     auto allEvents = toModel->getAllEvents();
@@ -752,22 +803,44 @@ static EventVector processNoteModel(sv_frame_t contextStart, std::shared_ptr<Not
             auto overlapStart = nextEvent.getFrame();
             auto overlapDuration = std::min(prevEnd, nextEnd) - overlapStart;
             
+            // Calculate weighted frequency for the merged event
+            float weightedFreq = calculateWeightedFrequency(prevEvent, nextEvent, overlapStart, overlapDuration);
+            
             // Choose merge strategy based on overlap characteristics
             if (overlapDuration < prevEvent.getDuration() * 0.5 && 
                 overlapDuration < nextEvent.getDuration() * 0.5) {
-                // Small overlap: merge by extending the earlier event
+                // Small overlap: merge by extending the earlier event with weighted frequency
                 auto mergedDuration = nextEnd - prevEvent.getFrame();
-                points[0] = prevEvent.withDuration(mergedDuration);
+                Event mergedEvent = prevEvent.withDuration(mergedDuration);
+                if (weightedFreq > 0.0f) {
+                    mergedEvent = mergedEvent.withValue(weightedFreq);
+                }
+                points[0] = mergedEvent;
                 toModel->remove(prevEvent);
             } else {
-                // Significant overlap: keep the longer event, adjust timing
-                if (prevEvent.getDuration() > nextEvent.getDuration()) {
-                    // Keep previous event, adjust next event start
-                    points[0] = nextEvent.withFrame(prevEnd);
-                } else {
-                    // Keep next event, remove previous
-                    toModel->remove(prevEvent);
+                // Significant overlap: create merged event with weighted frequency and optimal timing
+                auto mergedStart = prevEvent.getFrame();
+                auto mergedDuration = std::max(prevEnd, nextEnd) - mergedStart;
+                
+                // Use the event with better timing characteristics (earlier start)
+                Event mergedEvent = prevEvent.withDuration(mergedDuration);
+                if (weightedFreq > 0.0f) {
+                    mergedEvent = mergedEvent.withValue(weightedFreq);
                 }
+                
+                // Preserve additional properties from the longer event
+                if (nextEvent.getDuration() > prevEvent.getDuration()) {
+                    // Copy label and other properties from longer event if available
+                    if (nextEvent.hasLabel() && !prevEvent.hasLabel()) {
+                        mergedEvent = mergedEvent.withLabel(nextEvent.getLabel());
+                    }
+                    if (nextEvent.hasLevel() && !prevEvent.hasLevel()) {
+                        mergedEvent = mergedEvent.withLevel(nextEvent.getLevel());
+                    }
+                }
+                
+                points[0] = mergedEvent;
+                toModel->remove(prevEvent);
             }
         }
     }
