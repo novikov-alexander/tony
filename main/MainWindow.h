@@ -31,6 +31,11 @@ class MainWindow : public sv::MainWindowBase
     Q_OBJECT
 
 public:
+    enum class RecordingAnalysisMode {
+        AfterRecording = 0,   // Default
+        DuringRecording = 1
+    };
+
     MainWindow(AudioMode audioMode,
                bool withSonification = true,
                bool withSpectrogram = true);
@@ -93,6 +98,7 @@ protected slots:
     virtual void analyseDuringRecordingRunner();
     virtual void resetAnalyseOptions();
     virtual void recordAnalysisToggled();
+    virtual void analyseAfterRecordToggled();
 
     virtual void autoAnalysisToggled();
     virtual void precisionAnalysisToggled();
@@ -212,6 +218,7 @@ protected:
 
     QAction       *m_autoAnalyse;
     QAction       *m_analyseDuringRecord;
+    QAction       *m_analyseAfterRecord;
     QAction       *m_precise;
     QAction       *m_lowamp;
     QAction       *m_onset;
@@ -253,6 +260,9 @@ protected:
     virtual void setupAnalysisMenu();
     virtual void setupHelpMenu();
     virtual void setupToolbars();
+
+    RecordingAnalysisMode getRecordingAnalysisMode() const;
+    void setRecordingAnalysisMode(RecordingAnalysisMode mode);
 
     virtual void octaveShift(bool up);
 

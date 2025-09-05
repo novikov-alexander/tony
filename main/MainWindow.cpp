@@ -768,17 +768,32 @@ MainWindow::setupAnalysisMenu()
     QMenu *menu = menuBar()->addMenu(tr("&Analysis"));
     menu->setTearOffEnabled(true);
 
-    m_analyseDuringRecord = new QAction(tr("&Analyse during recording"), this);
+    // Create a submenu for analysis mode options
+    QMenu *modeMenu = menu->addMenu(tr("Analysis &Mode"));
+    modeMenu->setTearOffEnabled(true);
+
+    // Create a radio button group for recording analysis mode
+    QActionGroup *analysisGroup = new QActionGroup(this);
+    
+    m_analyseAfterRecord = new QAction(tr("Analyse &After Recording"), this);
+    m_analyseAfterRecord->setStatusTip(tr("Automatically trigger analysis after recording is complete."));
+    m_analyseAfterRecord->setCheckable(true);
+    m_analyseAfterRecord->setActionGroup(analysisGroup);
+    connect(m_analyseAfterRecord, SIGNAL(triggered()), this, SLOT(analyseAfterRecordToggled()));
+    modeMenu->addAction(m_analyseAfterRecord);
+
+    m_analyseDuringRecord = new QAction(tr("Analyse &During Recording"), this);
     m_analyseDuringRecord->setStatusTip(tr("Automatically trigger analysis during recording."));
     m_analyseDuringRecord->setCheckable(true);
+    m_analyseDuringRecord->setActionGroup(analysisGroup);
     connect(m_analyseDuringRecord, SIGNAL(triggered()), this, SLOT(recordAnalysisToggled()));
-    menu->addAction(m_analyseDuringRecord);
+    modeMenu->addAction(m_analyseDuringRecord);
 
     m_autoAnalyse = new QAction(tr("Auto-Analyse &New Audio"), this);
     m_autoAnalyse->setStatusTip(tr("Automatically trigger analysis upon opening of a new audio file."));
     m_autoAnalyse->setCheckable(true);
     connect(m_autoAnalyse, SIGNAL(triggered()), this, SLOT(autoAnalysisToggled()));
-    menu->addAction(m_autoAnalyse);
+    modeMenu->addAction(m_autoAnalyse);
 
     action = new QAction(tr("&Analyse Now!"), this);
     action->setStatusTip(tr("Trigger analysis of pitches and notes. (This will delete all existing pitches and notes.)"));
@@ -828,7 +843,7 @@ MainWindow::resetAnalyseOptions()
     QSettings settings;
     settings.beginGroup("Analyser");
 
-    settings.setValue("auto-analysis", true);
+    setRecordingAnalysisMode(RecordingAnalysisMode::AfterRecording);
 
     auto keyMap = Analyser::getAnalysisSettings();
     for (auto p: keyMap) {
@@ -839,17 +854,50 @@ MainWindow::resetAnalyseOptions()
     updateAnalyseStates();
 }
 
+MainWindow::RecordingAnalysisMode
+MainWindow::getRecordingAnalysisMode() const
+{
+    QSettings settings;
+    settings.beginGroup("Analyser");
+    int mode = settings.value("recording-analysis-mode", 
+                              static_cast<int>(RecordingAnalysisMode::AfterRecording)).toInt();
+    settings.endGroup();
+    return static_cast<RecordingAnalysisMode>(mode);
+}
+
+void
+MainWindow::setRecordingAnalysisMode(RecordingAnalysisMode mode)
+{
+    QSettings settings;
+    settings.beginGroup("Analyser");
+    settings.setValue("recording-analysis-mode", static_cast<int>(mode));
+    settings.endGroup();
+    updateAnalyseStates();
+}
+
 void
 MainWindow::updateAnalyseStates()
 {
     QSettings settings;
     settings.beginGroup("Analyser");
 
-    bool autoAnalyse = settings.value("auto-analysis", true).toBool();
-    m_autoAnalyse->setChecked(autoAnalyse);
-
-    bool analyseDuringRecord = settings.value("record-analysis", true).toBool();
-    m_analyseDuringRecord->setChecked(analyseDuringRecord);
+    // Handle recording analysis mode with enum-based approach
+    RecordingAnalysisMode mode = getRecordingAnalysisMode();
+    
+    switch (mode) {
+        case RecordingAnalysisMode::AfterRecording:
+            m_analyseAfterRecord->setChecked(true);
+            m_analyseDuringRecord->setChecked(false);
+            m_autoAnalyse->setChecked(true);
+            m_autoAnalyse->setEnabled(true);
+            break;
+        case RecordingAnalysisMode::DuringRecording:
+            m_analyseDuringRecord->setChecked(true);
+            m_analyseAfterRecord->setChecked(false);
+            m_autoAnalyse->setChecked(false);
+            m_autoAnalyse->setEnabled(false);
+            break;
+    }
 
     std::map<QString, QAction *> actions {
         { "precision-analysis", m_precise },
@@ -880,14 +928,21 @@ MainWindow::recordAnalysisToggled()
   if (!a) return;
 
   bool set = a->isChecked();
+  if (set) {
+      setRecordingAnalysisMode(RecordingAnalysisMode::DuringRecording);
+  }
+}
 
-  QSettings settings;
-  settings.beginGroup("Analyser");
-  settings.setValue("record-analysis", set);
-  settings.endGroup();
+void
+MainWindow::analyseAfterRecordToggled()
+{
+    QAction *a = qobject_cast<QAction *>(sender());
+    if (!a) return;
 
-  // make result visible explicitly, in case e.g. we just set the wrong key
-  updateAnalyseStates();
+    bool set = a->isChecked();
+    if (set) {
+        setRecordingAnalysisMode(RecordingAnalysisMode::AfterRecording);
+    }
 }
 
 void
