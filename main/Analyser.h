@@ -17,6 +17,7 @@
 #define ANALYSER_H
 
 #include <QObject>
+#include <QPointer>
 #include <QRect>
 #include <QMutex>
 
@@ -262,7 +263,11 @@ protected:
     sv::sv_frame_t m_analysedFrames = 0;
     FrequencyRange m_reAnalysingRange;
     std::vector<sv::Layer *> m_reAnalysisCandidates;
-    std::vector<sv::Layer *> m_realtimeAnalysisLayers;  // Track temporary layers for cleanup
+    std::vector<QPointer<sv::Layer>> m_realtimeAnalysisLayers;  // Track temporary layers for cleanup
+
+    bool m_realtimeAnalysisInFlight;
+    bool m_havePendingRealtimeSelection;
+    sv::Selection m_pendingRealtimeSelection;
     int m_currentCandidate;
     bool m_candidatesVisible;
     sv::Document::LayerCreationAsyncHandle m_currentAsyncHandle;
@@ -284,6 +289,9 @@ protected:
 
     void saveState(Component c) const;
     void loadState(Component c);
+    void cleanupRealtimeAnalysisLayers();
+    void untrackRealtimeAnalysisLayer(sv::Layer *layer);
+    void finishRealtimeAnalysisChunk();
 
     // TODO (alnovi): Move constexpression to a static class
     static constexpr const char* PYIN_PLUGIN_NAME = "pYIN";
