@@ -14,7 +14,6 @@
 */
 
 #include "OverlapProcessor.h"
-#include "data/model/Event.h"
 #include "data/model/SparseTimeValueModel.h"
 #include "data/model/NoteModel.h"
 #include <algorithm>

@@ -18,6 +18,7 @@
 
 #include <functional>
 #include <algorithm>
+#include <QPointer>
 
 #include "transform/TransformFactory.h"
 #include "transform/ModelTransformer.h"
@@ -630,15 +631,42 @@ void setBaseColour(LayerType* layer, const QString& colourName, ColourDatabase* 
 // Generalized helper function to process layers
 template <typename LayerType, typename ModelType>
 void processLayer(LayerType* layer, LayerType* targetLayer, sv::Document* document, sv::Pane* pane, std::vector<sv::Layer*>* trackingVector, std::function<EventVector(std::shared_ptr<ModelType>, std::shared_ptr<ModelType>)> customProcessing) {
+    // DIAGNOSTIC: Log layer creation
+    cerr << "processLayer: Creating async handler for layer " << layer << ", targetLayer " << targetLayer << endl;
+    
     QObject::connect(layer, &LayerType::modelCompletionChanged, [layer, targetLayer, document, pane, trackingVector, customProcessing](ModelId modelId) {
+        // DIAGNOSTIC: Log callback entry
+        cerr << "processLayer callback: layer=" << layer << ", targetLayer=" << targetLayer
+             << ", document=" << document << ", pane=" << pane << endl;
+        
+        // SAFETY CHECK: Validate pointers before use
+        if (!document || !pane || !targetLayer) {
+            cerr << "ERROR: processLayer callback invoked with null pointers! "
+                 << "document=" << document << ", pane=" << pane << ", targetLayer=" << targetLayer << endl;
+            return;
+        }
+        
         auto model = ModelById::getAs<ModelType>(modelId);
+        if (!model) {
+            cerr << "ERROR: processLayer callback - model is null for modelId" << endl;
+            return;
+        }
 
         if (model->getCompletion() == 100) {
+            cerr << "processLayer: Model completion reached 100%, processing events" << endl;
+            
             auto toModel = ModelById::getAs<ModelType>(targetLayer->getModel());
+            if (!toModel) {
+                cerr << "ERROR: processLayer - target model is null" << endl;
+                return;
+            }
+            
             EventVector points = model->getAllEvents();
+            cerr << "processLayer: Retrieved " << points.size() << " events from source model" << endl;
 
             // Custom processing logic
             points = customProcessing(model, toModel);
+            cerr << "processLayer: After processing, have " << points.size() << " events to add" << endl;
 
             for (const Event& p : points) {
                 toModel->add(p);
@@ -647,6 +675,7 @@ void processLayer(LayerType* layer, LayerType* targetLayer, sv::Document* docume
             QObject::disconnect(layer, &LayerType::modelCompletionChanged, nullptr, nullptr);
             
             // Clean up the temporary layer
+            cerr << "processLayer: Cleaning up temporary layer " << layer << endl;
             if (document && pane) {
                 document->removeLayerFromView(pane, layer);
                 document->deleteLayer(layer);
@@ -656,6 +685,7 @@ void processLayer(LayerType* layer, LayerType* targetLayer, sv::Document* docume
             if (trackingVector) {
                 trackingVector->erase(std::remove(trackingVector->begin(), trackingVector->end(), layer), trackingVector->end());
             }
+            cerr << "processLayer: Cleanup complete" << endl;
         }
         });
 }
@@ -760,12 +790,96 @@ Analyser::analyseRecording(Selection sel)
 
         if (tempPitchLayer) {
             setBaseColour(tempPitchLayer, tr("Black"), cdb);
-            processLayer<TimeValueLayer, SparseTimeValueModel>(tempPitchLayer, pitchLayer, m_document, m_pane, &m_realtimeAnalysisLayers, std::bind(processPitchModel, sel.getStartFrame(), std::placeholders::_1, std::placeholders::_2));
+            // SAFETY: Use QPointer to track object lifetime and prevent dangling pointer access
+            QPointer<TimeValueLayer> safeTempLayer(tempPitchLayer);
+            QPointer<TimeValueLayer> safePitchLayer(pitchLayer);
+            QPointer<Document> safeDocument(m_document);
+            QPointer<Pane> safePane(m_pane);
+            
+            QObject::connect(tempPitchLayer, &TimeValueLayer::modelCompletionChanged,
+                [this, safeTempLayer, safePitchLayer, safeDocument, safePane, sel](ModelId modelId) {
+                // SAFETY CHECK: Verify all pointers are still valid
+                if (!safeTempLayer || !safePitchLayer || !safeDocument || !safePane) {
+                    cerr << "WARNING: analyseRecording pitch callback - objects deleted, skipping" << endl;
+                    return;
+                }
+                
+                auto model = ModelById::getAs<SparseTimeValueModel>(modelId);
+                if (!model || model->getCompletion() != 100) {
+                    return;
+                }
+                
+                cerr << "analyseRecording: Processing pitch track completion" << endl;
+                auto toModel = ModelById::getAs<SparseTimeValueModel>(safePitchLayer->getModel());
+                if (!toModel) {
+                    cerr << "ERROR: Target pitch model is null" << endl;
+                    return;
+                }
+                
+                EventVector points = processPitchModel(sel.getStartFrame(), model, toModel);
+                
+                for (const Event& p : points) {
+                    toModel->add(p);
+                }
+                
+                QObject::disconnect(safeTempLayer, &TimeValueLayer::modelCompletionChanged, nullptr, nullptr);
+                
+                {
+                    QMutexLocker locker(&m_asyncMutex);
+                    m_realtimeAnalysisLayers.erase(
+                        std::remove(m_realtimeAnalysisLayers.begin(), m_realtimeAnalysisLayers.end(), safeTempLayer.data()),
+                        m_realtimeAnalysisLayers.end());
+                }
+                
+                safeDocument->removeLayerFromView(safePane, safeTempLayer);
+                safeDocument->deleteLayer(safeTempLayer);
+            });
         }
 
         if (tempNoteLayer) {
             setBaseColour(tempNoteLayer, tr("Bright Blue"), cdb);
-            processLayer<FlexiNoteLayer, NoteModel>(tempNoteLayer, noteLayer, m_document, m_pane, &m_realtimeAnalysisLayers, std::bind(processNoteModel, sel.getStartFrame(), std::placeholders::_1, std::placeholders::_2));
+            // SAFETY: Use QPointer to track object lifetime and prevent dangling pointer access
+            QPointer<FlexiNoteLayer> safeTempLayer(tempNoteLayer);
+            QPointer<FlexiNoteLayer> safeNoteLayer(noteLayer);
+            QPointer<Document> safeDocument(m_document);
+            QPointer<Pane> safePane(m_pane);
+            
+            // Capture the layer pointer before it might be deleted
+            Layer* layerPtr = safeTempLayer.data();
+            
+            QObject::connect(tempNoteLayer, &FlexiNoteLayer::modelCompletionChanged,
+                [layerPtr, safeTempLayer, safeNoteLayer, safeDocument, safePane, sel](ModelId modelId) {
+                // SAFETY CHECK: Verify all pointers are still valid
+                if (!safeTempLayer || !safeNoteLayer || !safeDocument || !safePane) {
+                    cerr << "WARNING: analyseRecording note callback - objects deleted, skipping" << endl;
+                    return;
+                }
+                
+                auto model = ModelById::getAs<NoteModel>(modelId);
+                if (!model || model->getCompletion() != 100) {
+                    return;
+                }
+                
+                cerr << "analyseRecording: Processing note layer completion" << endl;
+                auto toModel = ModelById::getAs<NoteModel>(safeNoteLayer->getModel());
+                if (!toModel) {
+                    cerr << "ERROR: Target note model is null" << endl;
+                    return;
+                }
+                
+                EventVector points = processNoteModel(sel.getStartFrame(), model, toModel);
+                
+                for (const Event& p : points) {
+                    toModel->add(p);
+                }
+                
+                QObject::disconnect(safeTempLayer, &FlexiNoteLayer::modelCompletionChanged, nullptr, nullptr);
+                
+                // Clean up temporary layer - no need to access m_realtimeAnalysisLayers
+                // as the layer will be automatically removed when deleted
+                safeDocument->removeLayerFromView(safePane, safeTempLayer);
+                safeDocument->deleteLayer(safeTempLayer);
+            });
         }
     }
   
