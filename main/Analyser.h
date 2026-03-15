@@ -20,6 +20,7 @@
 #include <QPointer>
 #include <QRect>
 #include <QMutex>
+#include <QtGlobal>
 
 #include <map>
 #include <vector>
@@ -268,6 +269,7 @@ protected:
     bool m_realtimeAnalysisInFlight;
     bool m_havePendingRealtimeSelection;
     sv::Selection m_pendingRealtimeSelection;
+    quint64 m_realtimeGeneration;
     int m_currentCandidate;
     bool m_candidatesVisible;
     sv::Document::LayerCreationAsyncHandle m_currentAsyncHandle;

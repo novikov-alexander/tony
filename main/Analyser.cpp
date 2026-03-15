@@ -55,7 +55,8 @@ Analyser::Analyser() :
     m_candidatesVisible(false),
     m_currentAsyncHandle(0),
     m_realtimeAnalysisInFlight(false),
-    m_havePendingRealtimeSelection(false)
+    m_havePendingRealtimeSelection(false),
+    m_realtimeGeneration(0)
 {
     QSettings settings;
     settings.beginGroup("LayerDefaults");
@@ -127,7 +128,6 @@ Analyser::finishRealtimeAnalysisChunk()
         QMutexLocker locker(&m_asyncMutex);
 
         m_realtimeAnalysisInFlight = false;
-        m_reAnalysingSelection = Selection();
 
         if (m_havePendingRealtimeSelection) {
             pending = m_pendingRealtimeSelection;
@@ -165,6 +165,11 @@ Analyser::newFileLoaded(Document *doc, ModelId model,
     m_fileModel = model;
     m_paneStack = paneStack;
     m_pane = pane;
+
+    {
+        QMutexLocker locker(&m_asyncMutex);
+        ++m_realtimeGeneration;
+    }
 
     if (!ModelById::isa<WaveFileModel>(m_fileModel)) {
         return "Internal error: Analyser::newFileLoaded() called with no model, or a non-WaveFileModel";
@@ -288,6 +293,10 @@ Analyser::fileClosed()
     m_realtimeAnalysisInFlight = false;
     m_havePendingRealtimeSelection = false;
     m_pendingRealtimeSelection = Selection();
+    {
+        QMutexLocker locker(&m_asyncMutex);
+        ++m_realtimeGeneration;
+    }
 
     m_document = 0;
     m_paneStack = 0;
@@ -713,6 +722,8 @@ static EventVector processNoteModel(sv_frame_t contextStart, std::shared_ptr<Not
 QString
 Analyser::analyseRecording(Selection sel)
 {
+    bool startedRealtimeChunk = false;
+
     auto waveFileModel = ModelById::getAs<WaveFileModel>(m_fileModel);
     if (!waveFileModel) {
         return "Internal error: Analyser::analyseRecording() called with no model present";
@@ -731,13 +742,20 @@ Analyser::analyseRecording(Selection sel)
 
     if (sel.isEmpty()) return "";
 
+    quint64 generation = 0;
     {
         QMutexLocker locker(&m_asyncMutex);
-        if (!m_reAnalysingSelection.isEmpty() && sel == m_reAnalysingSelection) {
-            cerr << "selection is same as current analysis, ignoring" << endl;
+
+        if (m_realtimeAnalysisInFlight) {
+            m_pendingRealtimeSelection = sel;
+            m_havePendingRealtimeSelection = true;
+            cerr << "Analyser::analyseRecording: realtime analysis already in flight, replacing pending selection" << endl;
             return "";
         }
-        m_reAnalysingSelection = sel;
+
+        m_realtimeAnalysisInFlight = true;
+        startedRealtimeChunk = true;
+        generation = m_realtimeGeneration;
     }
 
     TransformFactory *tf = TransformFactory::getInstance();
@@ -750,10 +768,16 @@ Analyser::analyseRecording(Selection sel)
            "<br><br>Are the %2 and %3 Vamp plugins correctly installed?");
 
     if (!tf->haveTransform(f0_transform)) {
+        if (startedRealtimeChunk) {
+            finishRealtimeAnalysisChunk();
+        }
         return notFound.arg(f0_transform).arg(PYIN_PLUGIN_NAME);
     }
 
     if (!tf->haveTransform(note_transform)) {
+        if (startedRealtimeChunk) {
+            finishRealtimeAnalysisChunk();
+        }
         return notFound.arg(note_transform).arg(PYIN_PLUGIN_NAME);
     }
 
@@ -782,6 +806,9 @@ Analyser::analyseRecording(Selection sel)
 
     if (duration <= RealTime::zeroTime) {
         cerr << "Analyser::analyseRecording: duration <= 0, not analysing" << endl;
+        if (startedRealtimeChunk) {
+            finishRealtimeAnalysisChunk();
+        }
         return "";
     }
 
@@ -797,6 +824,14 @@ Analyser::analyseRecording(Selection sel)
     std::vector<Layer *> layers =
         m_document->createDerivedLayers(transforms, m_fileModel);
 
+    if (layers.empty()) {
+        cerr << "WARNING: analyseRecording: no layers returned from createDerivedLayers" << endl;
+        if (startedRealtimeChunk) {
+            finishRealtimeAnalysisChunk();
+        }
+        return "";
+    }
+
     ColourDatabase *cdb = ColourDatabase::getInstance();
 
     {
@@ -806,10 +841,13 @@ Analyser::analyseRecording(Selection sel)
         }
     }
 
+    auto remainingParts = std::make_shared<int>(0);
+
     for (auto *layer : layers) {
 
         if (auto *tempPitchLayer = qobject_cast<TimeValueLayer *>(layer)) {
 
+            ++(*remainingParts);
             setBaseColour(tempPitchLayer, tr("Black"), cdb);
 
             QPointer<TimeValueLayer> safeTempLayer(tempPitchLayer);
@@ -821,12 +859,7 @@ Analyser::analyseRecording(Selection sel)
                 tempPitchLayer,
                 &TimeValueLayer::modelCompletionChanged,
                 this,
-                [this, safeTempLayer, safeTargetLayer, safeDocument, safePane, sel](ModelId modelId) {
-
-                    if (!safeTempLayer || !safeTargetLayer || !safeDocument || !safePane) {
-                        cerr << "WARNING: analyseRecording pitch callback - objects deleted, skipping" << endl;
-                        return;
-                    }
+                [this, safeTempLayer, safeTargetLayer, safeDocument, safePane, sel, remainingParts, generation](ModelId modelId) {
 
                     auto fromModel = ModelById::getAs<SparseTimeValueModel>(modelId);
                     if (!fromModel || fromModel->getCompletion() != 100) {
@@ -835,36 +868,77 @@ Analyser::analyseRecording(Selection sel)
 
                     cerr << "analyseRecording: Processing pitch track completion" << endl;
 
-                    auto toModel =
-                        ModelById::getAs<SparseTimeValueModel>(safeTargetLayer->getModel());
-                    if (!toModel) {
-                        cerr << "ERROR: analyseRecording pitch callback - target model is null" << endl;
+                    bool stale = false;
+                    {
+                        QMutexLocker locker(&m_asyncMutex);
+                        stale = (generation != m_realtimeGeneration);
+                    }
+
+                    if (stale) {
+                        cerr << "analyseRecording: Ignoring stale pitch callback from old generation" << endl;
+
+                        Layer *layerToDelete = safeTempLayer.data();
+                        if (layerToDelete) {
+                            untrackRealtimeAnalysisLayer(layerToDelete);
+
+                            if (safeDocument && safePane) {
+                                safeDocument->removeLayerFromView(safePane.data(), layerToDelete);
+                                if (safeTempLayer) {
+                                    safeDocument->deleteLayer(layerToDelete);
+                                }
+                            }
+                        }
+
+                        --(*remainingParts);
+                        if (*remainingParts == 0) {
+                            finishRealtimeAnalysisChunk();
+                        }
                         return;
                     }
 
-                    EventVector points =
-                        processPitchModel(sel.getStartFrame(), fromModel, toModel);
+                    if (safeTargetLayer) {
+                        auto toModel =
+                            ModelById::getAs<SparseTimeValueModel>(safeTargetLayer->getModel());
 
-                    for (const Event &p : points) {
-                        toModel->add(p);
+                        if (toModel) {
+                            EventVector points =
+                                processPitchModel(sel.getStartFrame(), fromModel, toModel);
+
+                            for (const Event &p : points) {
+                                toModel->add(p);
+                            }
+                        } else {
+                            cerr << "ERROR: analyseRecording pitch callback - target model is null" << endl;
+                        }
+                    } else {
+                        cerr << "WARNING: analyseRecording pitch callback - target layer deleted" << endl;
                     }
 
                     Layer *layerToDelete = safeTempLayer.data();
                     if (layerToDelete) {
                         untrackRealtimeAnalysisLayer(layerToDelete);
-                        safeDocument->removeLayerFromView(safePane.data(), layerToDelete);
-                        if (safeTempLayer) {
-                            safeDocument->deleteLayer(layerToDelete);
+
+                        if (safeDocument && safePane) {
+                            safeDocument->removeLayerFromView(safePane.data(), layerToDelete);
+                            if (safeTempLayer) {
+                                safeDocument->deleteLayer(layerToDelete);
+                            }
                         }
                     }
 
                     emit layersChanged();
+
+                    --(*remainingParts);
+                    if (*remainingParts == 0) {
+                        finishRealtimeAnalysisChunk();
+                    }
                 },
                 Qt::QueuedConnection);
         }
 
         if (auto *tempNoteLayer = qobject_cast<FlexiNoteLayer *>(layer)) {
 
+            ++(*remainingParts);
             setBaseColour(tempNoteLayer, tr("Bright Blue"), cdb);
 
             QPointer<FlexiNoteLayer> safeTempLayer(tempNoteLayer);
@@ -876,12 +950,7 @@ Analyser::analyseRecording(Selection sel)
                 tempNoteLayer,
                 &FlexiNoteLayer::modelCompletionChanged,
                 this,
-                [this, safeTempLayer, safeTargetLayer, safeDocument, safePane, sel](ModelId modelId) {
-
-                    if (!safeTempLayer || !safeTargetLayer || !safeDocument || !safePane) {
-                        cerr << "WARNING: analyseRecording note callback - objects deleted, skipping" << endl;
-                        return;
-                    }
+                [this, safeTempLayer, safeTargetLayer, safeDocument, safePane, sel, remainingParts, generation](ModelId modelId) {
 
                     auto fromModel = ModelById::getAs<NoteModel>(modelId);
                     if (!fromModel || fromModel->getCompletion() != 100) {
@@ -890,33 +959,78 @@ Analyser::analyseRecording(Selection sel)
 
                     cerr << "analyseRecording: Processing note layer completion" << endl;
 
-                    auto toModel =
-                        ModelById::getAs<NoteModel>(safeTargetLayer->getModel());
-                    if (!toModel) {
-                        cerr << "ERROR: analyseRecording note callback - target model is null" << endl;
+                    bool stale = false;
+                    {
+                        QMutexLocker locker(&m_asyncMutex);
+                        stale = (generation != m_realtimeGeneration);
+                    }
+
+                    if (stale) {
+                        cerr << "analyseRecording: Ignoring stale note callback from old generation" << endl;
+
+                        Layer *layerToDelete = safeTempLayer.data();
+                        if (layerToDelete) {
+                            untrackRealtimeAnalysisLayer(layerToDelete);
+
+                            if (safeDocument && safePane) {
+                                safeDocument->removeLayerFromView(safePane.data(), layerToDelete);
+                                if (safeTempLayer) {
+                                    safeDocument->deleteLayer(layerToDelete);
+                                }
+                            }
+                        }
+
+                        --(*remainingParts);
+                        if (*remainingParts == 0) {
+                            finishRealtimeAnalysisChunk();
+                        }
                         return;
                     }
 
-                    EventVector points =
-                        processNoteModel(sel.getStartFrame(), fromModel, toModel);
+                    if (safeTargetLayer) {
+                        auto toModel =
+                            ModelById::getAs<NoteModel>(safeTargetLayer->getModel());
 
-                    for (const Event &p : points) {
-                        toModel->add(p);
+                        if (toModel) {
+                            EventVector points =
+                                processNoteModel(sel.getStartFrame(), fromModel, toModel);
+
+                            for (const Event &p : points) {
+                                toModel->add(p);
+                            }
+                        } else {
+                            cerr << "ERROR: analyseRecording note callback - target model is null" << endl;
+                        }
+                    } else {
+                        cerr << "WARNING: analyseRecording note callback - target layer deleted" << endl;
                     }
 
                     Layer *layerToDelete = safeTempLayer.data();
                     if (layerToDelete) {
                         untrackRealtimeAnalysisLayer(layerToDelete);
-                        safeDocument->removeLayerFromView(safePane.data(), layerToDelete);
-                        if (safeTempLayer) {
-                            safeDocument->deleteLayer(layerToDelete);
+
+                        if (safeDocument && safePane) {
+                            safeDocument->removeLayerFromView(safePane.data(), layerToDelete);
+                            if (safeTempLayer) {
+                                safeDocument->deleteLayer(layerToDelete);
+                            }
                         }
                     }
 
                     emit layersChanged();
+
+                    --(*remainingParts);
+                    if (*remainingParts == 0) {
+                        finishRealtimeAnalysisChunk();
+                    }
                 },
                 Qt::QueuedConnection);
         }
+    }
+
+    if (*remainingParts == 0) {
+        cerr << "WARNING: analyseRecording: no recognised temp layers created" << endl;
+        finishRealtimeAnalysisChunk();
     }
 
     return "";
