@@ -14,11 +14,9 @@
 */
 
 #include "Analyser.h"
-#include "OverlapProcessor.h"
+#include "RealtimeAnalyser.h"
 
 #include <algorithm>
-#include <utility>
-#include <QPointer>
 
 #include "transform/TransformFactory.h"
 #include "transform/ModelTransformer.h"
@@ -54,9 +52,7 @@ Analyser::Analyser() :
     m_pane(nullptr),
     m_currentCandidate(-1),
     m_candidatesVisible(false),
-    m_currentAsyncHandle(0),
-    m_realtimeAnalysisInFlight(false),
-    m_realtimeGeneration(0)
+    m_currentAsyncHandle(0)
 {
     QSettings settings;
     settings.beginGroup("LayerDefaults");
@@ -72,75 +68,18 @@ Analyser::Analyser() :
          QString("<layer verticalScale=\"%1\"/>")
          .arg(int(FlexiNoteLayer::AutoAlignScale)));
     settings.endGroup();
+
+    m_realtimeAnalyser = new RealtimeAnalyser(this);
+    connect(m_realtimeAnalyser, &RealtimeAnalyser::layersChanged,
+            this, &Analyser::layersChanged,
+            Qt::QueuedConnection);
 }
 
 Analyser::~Analyser()
 {
-    cleanupRealtimeAnalysisLayers();
-}
-
-void
-Analyser::cleanupRealtimeAnalysisLayers()
-{
-    std::vector<QPointer<Layer>> layersToClean;
-
-    {
-        QMutexLocker locker(&m_asyncMutex);
-        layersToClean.swap(m_realtimeAnalysisLayers);
+    if (m_realtimeAnalyser) {
+        m_realtimeAnalyser->cleanup();
     }
-
-    if (!m_document || !m_pane) {
-        return;
-    }
-
-    for (const auto &layerPtr : layersToClean) {
-        Layer *layer = layerPtr.data();
-        if (!layer) {
-            continue;
-        }
-
-        m_document->removeLayerFromView(m_pane, layer);
-        m_document->deleteLayer(layer);
-    }
-}
-
-void
-Analyser::untrackRealtimeAnalysisLayer(Layer *layer)
-{
-    QMutexLocker locker(&m_asyncMutex);
-
-    m_realtimeAnalysisLayers.erase(
-        std::remove_if(m_realtimeAnalysisLayers.begin(),
-                       m_realtimeAnalysisLayers.end(),
-                       [layer](const QPointer<Layer> &p) {
-                           return p.isNull() || p.data() == layer;
-                       }),
-        m_realtimeAnalysisLayers.end());
-}
-
-void
-Analyser::finishRealtimeAnalysisChunk()
-{
-    std::optional<Selection> pending;
-
-    {
-        QMutexLocker locker(&m_asyncMutex);
-
-        m_realtimeAnalysisInFlight = false;
-        pending = std::exchange(m_pendingRealtimeSelection, std::nullopt);
-    }
-
-    if (pending) {
-        cerr << "Analyser::finishRealtimeAnalysisChunk: starting pending realtime selection" << endl;
-        (void)analyseRecording(*pending);
-    }
-}
-
-bool
-Analyser::isStaleRealtimeGeneration(quint64 generation) const
-{
-    QMutexLocker locker(&m_asyncMutex);
-    return generation != m_realtimeGeneration;
 }
 
 std::map<QString, QVariant>
@@ -161,14 +100,20 @@ Analyser::newFileLoaded(Document *doc, ModelId model,
         disconnect(m_document, nullptr, this, nullptr);
     }
 
+    // Clean up any in-flight realtime analysis layers/callbacks tied to the previous document
+    if (m_realtimeAnalyser) {
+        m_realtimeAnalyser->cleanup();
+    }
+
     m_document = doc;
     m_fileModel = model;
     m_paneStack = paneStack;
     m_pane = pane;
 
-    {
-        QMutexLocker locker(&m_asyncMutex);
-        ++m_realtimeGeneration;
+    if (m_realtimeAnalyser) {
+        // Targets are (re)created later in addAnalyses(); set minimal context now
+        m_realtimeAnalyser->setContext(m_document, m_fileModel, m_pane, nullptr, nullptr);
+        m_realtimeAnalyser->invalidateGeneration();
     }
 
     if (!ModelById::isa<WaveFileModel>(m_fileModel)) {
@@ -280,7 +225,11 @@ Analyser::fileClosed()
     }
     m_currentAsyncHandle = 0;
 
-    cleanupRealtimeAnalysisLayers();
+    if (m_realtimeAnalyser) {
+        m_realtimeAnalyser->cleanup();
+        m_realtimeAnalyser->clearContext();
+        m_realtimeAnalyser->invalidateGeneration();
+    }
 
     m_layers.clear();
     m_reAnalysisCandidates.clear();
@@ -289,13 +238,6 @@ Analyser::fileClosed()
     m_reAnalysingRange = FrequencyRange();
     m_candidatesVisible = false;
     m_analysedFrames = 0;
-
-    m_realtimeAnalysisInFlight = false;
-    m_pendingRealtimeSelection = std::nullopt;
-    {
-        QMutexLocker locker(&m_asyncMutex);
-        ++m_realtimeGeneration;
-    }
 
     m_document = nullptr;
     m_paneStack = nullptr;
@@ -545,6 +487,11 @@ static void setAnalysisSettings(Transform& transform)
 QString
 Analyser::addAnalyses()
 {
+    if (m_realtimeAnalyser) {
+        // Prevent stale callbacks touching soon-to-be-replaced pitch/note layers
+        m_realtimeAnalyser->invalidateGeneration();
+        m_realtimeAnalyser->cleanup();
+    }
     auto waveFileModel = ModelById::getAs<WaveFileModel>(m_fileModel);
     if (!waveFileModel) {
         return "Internal error: Analyser::addAnalyses() called with no model present";
@@ -667,6 +614,12 @@ Analyser::addAnalyses()
                 this, SLOT(materialiseReAnalysis()));
     }
 
+    if (m_realtimeAnalyser) {
+        auto *pitchLayer = qobject_cast<TimeValueLayer *>(m_layers[PitchTrack]);
+        auto *noteLayer  = qobject_cast<FlexiNoteLayer *>(m_layers[Notes]);
+        m_realtimeAnalyser->setContext(m_document, m_fileModel, m_pane, pitchLayer, noteLayer);
+    }
+
     return "";
 }
 
@@ -701,293 +654,18 @@ Analyser::updateNoteLayer(sv::ModelId)
     emit layersChanged();
 }
 
-template <typename LayerType>
-void setBaseColour(LayerType* layer, const QString& colourName, ColourDatabase* cdb) {
-    layer->setBaseColour(cdb->getColourIndex(colourName));
-}
-
-// Global overlap processor instance for efficient processing
-static OverlapProcessor s_overlapProcessor;
-
-// Wrapper functions for backward compatibility
-static EventVector processPitchModel(sv_frame_t contextStart, std::shared_ptr<SparseTimeValueModel> fromModel, std::shared_ptr<SparseTimeValueModel> toModel) {
-    return s_overlapProcessor.processPitchModel(contextStart, fromModel, toModel);
-}
-
-static EventVector processNoteModel(sv_frame_t contextStart, std::shared_ptr<NoteModel> fromModel, std::shared_ptr<NoteModel> toModel) {
-    return s_overlapProcessor.processNoteModel(contextStart, fromModel, toModel);
-}
-
 QString
 Analyser::analyseRecording(Selection sel)
 {
-    bool startedRealtimeChunk = false;
-
-    const auto waveFileModel = ModelById::getAs<WaveFileModel>(m_fileModel);
-    if (!waveFileModel) {
-        return "Internal error: Analyser::analyseRecording() called with no model present";
-    }
-
-    if (!m_document || !m_pane) {
-        return "Internal error: Analyser::analyseRecording() called with no document or pane present";
+    if (!m_realtimeAnalyser) {
+        return "Internal error: Analyser::analyseRecording() called with no realtime analyser present";
     }
 
     auto *pitchLayer = qobject_cast<TimeValueLayer *>(m_layers[PitchTrack]);
     auto *noteLayer  = qobject_cast<FlexiNoteLayer *>(m_layers[Notes]);
 
-    if (!pitchLayer || !noteLayer) {
-        return "Internal error: Analyser::analyseRecording() called with no target pitch/note layers present";
-    }
-
-    if (sel.isEmpty()) return "";
-
-    quint64 generation = 0;
-    {
-        QMutexLocker locker(&m_asyncMutex);
-
-        if (m_realtimeAnalysisInFlight) {
-            m_pendingRealtimeSelection = sel;
-            cerr << "Analyser::analyseRecording: realtime analysis already in flight, replacing pending selection" << endl;
-            return "";
-        }
-
-        m_realtimeAnalysisInFlight = true;
-        startedRealtimeChunk = true;
-        generation = m_realtimeGeneration;
-    }
-
-    auto finishIfStarted = [this, &startedRealtimeChunk]() {
-        if (startedRealtimeChunk) {
-            finishRealtimeAnalysisChunk();
-        }
-    };
-
-    auto cleanupTempLayer = [this](auto safeTempLayer, auto safeDocument, auto safePane) {
-        Layer *layerToDelete = safeTempLayer.data();
-        if (!layerToDelete) return;
-
-        untrackRealtimeAnalysisLayer(layerToDelete);
-
-        if (safeDocument && safePane) {
-            safeDocument->removeLayerFromView(safePane.data(), layerToDelete);
-            if (safeTempLayer) {
-                safeDocument->deleteLayer(layerToDelete);
-            }
-        }
-    };
-
-    struct RealtimeChunkState {
-        int remainingParts = 0;
-    };
-    auto state = std::make_shared<RealtimeChunkState>();
-
-    auto completePart = [this, state]() {
-        --state->remainingParts;
-        if (state->remainingParts == 0) {
-            finishRealtimeAnalysisChunk();
-        }
-    };
-
-    TransformFactory *tf = TransformFactory::getInstance();
-
-    const auto f0_transform   = QString(PYIN_TRANSFORM_BASE) + QString(PYIN_F0_OUT);
-    const auto note_transform = QString(PYIN_TRANSFORM_BASE) + QString(PYIN_NOTE_OUT);
-
-    QString notFound =
-        tr("Transform \"%1\" not found. Unable to perform interactive analysis."
-           "<br><br>Are the %2 and %3 Vamp plugins correctly installed?");
-
-    if (!tf->haveTransform(f0_transform)) {
-        finishIfStarted();
-        return notFound.arg(f0_transform).arg(PYIN_PLUGIN_NAME);
-    }
-
-    if (!tf->haveTransform(note_transform)) {
-        finishIfStarted();
-        return notFound.arg(note_transform).arg(PYIN_PLUGIN_NAME);
-    }
-
-    Transform t = tf->getDefaultTransformFor(f0_transform,
-                                             waveFileModel->getSampleRate());
-    t.setStepSize(256);
-    t.setBlockSize(2048);
-
-    setAnalysisSettings(t);
-
-    const RealTime start =
-        RealTime::frame2RealTime(sel.getStartFrame(), waveFileModel->getSampleRate());
-    const RealTime end =
-        RealTime::frame2RealTime(sel.getEndFrame(), waveFileModel->getSampleRate());
-
-    RealTime duration;
-    if (sel.getEndFrame() > sel.getStartFrame()) {
-        duration = end - start;
-    }
-
-    cerr << "Analyser::analyseRecording: start " << start
-         << " end " << end
-         << " original selection start " << sel.getStartFrame()
-         << " end " << sel.getEndFrame()
-         << " duration " << duration << endl;
-
-    if (duration <= RealTime::zeroTime) {
-        cerr << "Analyser::analyseRecording: duration <= 0, not analysing" << endl;
-        finishIfStarted();
-        return "";
-    }
-
-    t.setStartTime(start);
-    t.setDuration(duration);
-
-    Transforms transforms;
-    transforms.push_back(t);
-
-    t.setOutput(PYIN_NOTE_OUT);
-    transforms.push_back(t);
-
-    const std::vector<Layer *> layers =
-        m_document->createDerivedLayers(transforms, m_fileModel);
-
-    if (layers.empty()) {
-        cerr << "WARNING: analyseRecording: no layers returned from createDerivedLayers" << endl;
-        finishIfStarted();
-        return "";
-    }
-
-    ColourDatabase *cdb = ColourDatabase::getInstance();
-
-    {
-        QMutexLocker locker(&m_asyncMutex);
-        for (auto *layer : layers) {
-            m_realtimeAnalysisLayers.push_back(QPointer<Layer>(layer));
-        }
-    }
-
-    for (auto *layer : layers) {
-
-        if (auto *tempPitchLayer = qobject_cast<TimeValueLayer *>(layer)) {
-
-            ++state->remainingParts;
-            setBaseColour(tempPitchLayer, tr("Black"), cdb);
-
-            QPointer<TimeValueLayer> safeTempLayer(tempPitchLayer);
-            QPointer<TimeValueLayer> safeTargetLayer(pitchLayer);
-            QPointer<Document> safeDocument(m_document);
-            QPointer<Pane> safePane(m_pane);
-
-            QObject::connect(
-                tempPitchLayer,
-                &TimeValueLayer::modelCompletionChanged,
-                this,
-                [this, safeTempLayer, safeTargetLayer, safeDocument, safePane,
-                 sel, state, generation, cleanupTempLayer, completePart](ModelId modelId) {
-
-                    const auto fromModel = ModelById::getAs<SparseTimeValueModel>(modelId);
-                    if (!fromModel || fromModel->getCompletion() != 100) {
-                        return;
-                    }
-
-                    cerr << "analyseRecording: Processing pitch track completion" << endl;
-
-                    if (isStaleRealtimeGeneration(generation)) {
-                        cerr << "analyseRecording: Ignoring stale pitch callback from old generation" << endl;
-                        cleanupTempLayer(safeTempLayer, safeDocument, safePane);
-                        completePart();
-                        return;
-                    }
-
-                    if (safeTargetLayer) {
-                        const auto toModel =
-                            ModelById::getAs<SparseTimeValueModel>(safeTargetLayer->getModel());
-
-                        if (toModel) {
-                            const EventVector points =
-                                processPitchModel(sel.getStartFrame(), fromModel, toModel);
-
-                            for (const Event &p : points) {
-                                toModel->add(p);
-                            }
-                        } else {
-                            cerr << "ERROR: analyseRecording pitch callback - target model is null" << endl;
-                        }
-                    } else {
-                        cerr << "WARNING: analyseRecording pitch callback - target layer deleted" << endl;
-                    }
-
-                    cleanupTempLayer(safeTempLayer, safeDocument, safePane);
-
-                    emit layersChanged();
-
-                    completePart();
-                },
-                Qt::QueuedConnection);
-        }
-
-        if (auto *tempNoteLayer = qobject_cast<FlexiNoteLayer *>(layer)) {
-
-            ++state->remainingParts;
-            setBaseColour(tempNoteLayer, tr("Bright Blue"), cdb);
-
-            QPointer<FlexiNoteLayer> safeTempLayer(tempNoteLayer);
-            QPointer<FlexiNoteLayer> safeTargetLayer(noteLayer);
-            QPointer<Document> safeDocument(m_document);
-            QPointer<Pane> safePane(m_pane);
-
-            QObject::connect(
-                tempNoteLayer,
-                &FlexiNoteLayer::modelCompletionChanged,
-                this,
-                [this, safeTempLayer, safeTargetLayer, safeDocument, safePane,
-                 sel, state, generation, cleanupTempLayer, completePart](ModelId modelId) {
-
-                    const auto fromModel = ModelById::getAs<NoteModel>(modelId);
-                    if (!fromModel || fromModel->getCompletion() != 100) {
-                        return;
-                    }
-
-                    cerr << "analyseRecording: Processing note layer completion" << endl;
-
-                    if (isStaleRealtimeGeneration(generation)) {
-                        cerr << "analyseRecording: Ignoring stale note callback from old generation" << endl;
-                        cleanupTempLayer(safeTempLayer, safeDocument, safePane);
-                        completePart();
-                        return;
-                    }
-
-                    if (safeTargetLayer) {
-                        const auto toModel =
-                            ModelById::getAs<NoteModel>(safeTargetLayer->getModel());
-
-                        if (toModel) {
-                            const EventVector points =
-                                processNoteModel(sel.getStartFrame(), fromModel, toModel);
-
-                            for (const Event &p : points) {
-                                toModel->add(p);
-                            }
-                        } else {
-                            cerr << "ERROR: analyseRecording note callback - target model is null" << endl;
-                        }
-                    } else {
-                        cerr << "WARNING: analyseRecording note callback - target layer deleted" << endl;
-                    }
-
-                    cleanupTempLayer(safeTempLayer, safeDocument, safePane);
-
-                    emit layersChanged();
-
-                    completePart();
-                },
-                Qt::QueuedConnection);
-        }
-    }
-
-    if (state->remainingParts == 0) {
-        cerr << "WARNING: analyseRecording: no recognised temp layers created" << endl;
-        finishRealtimeAnalysisChunk();
-    }
-
-    return "";
+    m_realtimeAnalyser->setContext(m_document, m_fileModel, m_pane, pitchLayer, noteLayer);
+    return m_realtimeAnalyser->analyseChunk(sel);
 }
 
 

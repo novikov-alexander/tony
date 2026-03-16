@@ -17,14 +17,12 @@
 #define ANALYSER_H
 
 #include <QObject>
-#include <QPointer>
 #include <QRect>
 #include <QMutex>
 #include <QtGlobal>
 
 #include <map>
 #include <vector>
-#include <optional>
 
 #include "framework/Document.h"
 #include "base/Selection.h"
@@ -38,6 +36,8 @@ class Layer;
 class TimeValueLayer;
 class Layer;
 }
+
+class RealtimeAnalyser;
 
 class Analyser : public QObject,
                  public sv::Document::LayerCreationHandler
@@ -265,11 +265,9 @@ protected:
     sv::sv_frame_t m_analysedFrames = 0;
     FrequencyRange m_reAnalysingRange;
     std::vector<sv::Layer *> m_reAnalysisCandidates;
-    std::vector<QPointer<sv::Layer>> m_realtimeAnalysisLayers;  // Track temporary layers for cleanup
 
-    bool m_realtimeAnalysisInFlight;
-    std::optional<sv::Selection> m_pendingRealtimeSelection;
-    quint64 m_realtimeGeneration;
+    RealtimeAnalyser *m_realtimeAnalyser = nullptr;
+
     int m_currentCandidate;
     bool m_candidatesVisible;
     sv::Document::LayerCreationAsyncHandle m_currentAsyncHandle;
@@ -291,12 +289,7 @@ protected:
 
     void saveState(Component c) const;
     void loadState(Component c);
-    void cleanupRealtimeAnalysisLayers();
-    void untrackRealtimeAnalysisLayer(sv::Layer *layer);
-    void finishRealtimeAnalysisChunk();
-    bool isStaleRealtimeGeneration(quint64 generation) const;
 
-    // TODO (alnovi): Move constexpression to a static class
     static constexpr const char* PYIN_PLUGIN_NAME = "pYIN";
     static constexpr const char* PYIN_TRANSFORM_BASE = "vamp:pyin:pyin:";
     static constexpr const char* PYIN_F0_OUT = "smoothedpitchtrack";

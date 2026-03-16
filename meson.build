@@ -186,7 +186,8 @@ elif system == 'darwin'
   rc = []
 
   general_defines += [
-    '-mmacosx-version-min=10.15'
+    '-mmacosx-version-min=10.15',
+    '-D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_NONE'
   ]
   general_link_args += [
     '-mmacosx-version-min=10.15'
@@ -1021,6 +1022,7 @@ chp_plugin = shared_library(
 tony_main_files = [
   'main/main.cpp',
   'main/Analyser.cpp',
+  'main/RealtimeAnalyser.cpp',
   'main/OverlapProcessor.cpp',
   'main/MainWindow.cpp',
   'main/NetworkPermissionTester.cpp',
@@ -1030,6 +1032,7 @@ tony_main_moc_files = qt.preprocess(
   moc_headers: [
   'main/MainWindow.h',
   'main/Analyser.h',
+  'main/RealtimeAnalyser.h',
 ])
 
 qt_resource_files = qt.preprocess(
