@@ -40,18 +40,22 @@ using namespace sv;
 static OverlapProcessor s_overlapProcessor;
 
 // Wrapper functions
-static EventVector processPitchModel(sv_frame_t contextStart,
-                                    std::shared_ptr<SparseTimeValueModel> fromModel,
-                                    std::shared_ptr<SparseTimeValueModel> toModel)
+static OverlapProcessor::EventPatch processPitchEvents(sv_frame_t contextStart,
+                                                       const std::shared_ptr<SparseTimeValueModel> &fromModel,
+                                                       const std::shared_ptr<SparseTimeValueModel> &toModel)
 {
-    return s_overlapProcessor.processPitchModel(contextStart, std::move(fromModel), std::move(toModel));
+    return s_overlapProcessor.processPitchEvents(contextStart,
+                                                 fromModel->getAllEvents(),
+                                                 toModel->getAllEvents());
 }
 
-static EventVector processNoteModel(sv_frame_t contextStart,
-                                   std::shared_ptr<NoteModel> fromModel,
-                                   std::shared_ptr<NoteModel> toModel)
+static OverlapProcessor::EventPatch processNoteEvents(sv_frame_t contextStart,
+                                                      const std::shared_ptr<NoteModel> &fromModel,
+                                                      const std::shared_ptr<NoteModel> &toModel)
 {
-    return s_overlapProcessor.processNoteModel(contextStart, std::move(fromModel), std::move(toModel));
+    return s_overlapProcessor.processNoteEvents(contextStart,
+                                                fromModel->getAllEvents(),
+                                                toModel->getAllEvents());
 }
 
 static std::map<QString, bool> getAnalysisSettingsFromSettings()
@@ -401,10 +405,13 @@ RealtimeAnalyser::analyseChunk(Selection sel)
                             ModelById::getAs<SparseTimeValueModel>(safeTargetPitchLayer->getModel());
 
                         if (toModel) {
-                            const EventVector points =
-                                processPitchModel(sel.getStartFrame(), fromModel, toModel);
+                            const auto patch =
+                                processPitchEvents(sel.getStartFrame(), fromModel, toModel);
 
-                            for (const Event &p : points) {
+                            for (const Event &p : patch.remove) {
+                                toModel->remove(p);
+                            }
+                            for (const Event &p : patch.add) {
                                 toModel->add(p);
                             }
                         } else {
@@ -462,10 +469,13 @@ RealtimeAnalyser::analyseChunk(Selection sel)
                             ModelById::getAs<NoteModel>(safeTargetNoteLayer->getModel());
 
                         if (toModel) {
-                            const EventVector points =
-                                processNoteModel(sel.getStartFrame(), fromModel, toModel);
+                            const auto patch =
+                                processNoteEvents(sel.getStartFrame(), fromModel, toModel);
 
-                            for (const Event &p : points) {
+                            for (const Event &p : patch.remove) {
+                                toModel->remove(p);
+                            }
+                            for (const Event &p : patch.add) {
                                 toModel->add(p);
                             }
                         } else {

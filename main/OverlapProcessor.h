@@ -17,14 +17,13 @@
 #define OVERLAP_PROCESSOR_H
 
 #include <vector>
-#include <memory>
+#include <cstddef>
+#include <optional>
 
-// Forward declarations - includes will be in the .cpp file
+#include "base/Event.h"
+
 namespace sv {
-    class Event;
     typedef std::vector<Event> EventVector;
-    class SparseTimeValueModel;
-    class NoteModel;
     typedef int64_t sv_frame_t;
 }
 
@@ -49,13 +48,15 @@ struct OverlapConfig {
  * Structure to represent a group of overlapping events
  */
 struct OverlapGroup {
-    EventVector events;
+    std::vector<size_t> indices;
     sv_frame_t startFrame;
     sv_frame_t endFrame;
-    
-    explicit OverlapGroup(const EventVector& evts);
-    bool isEmpty() const { return events.empty(); }
-    size_t size() const { return events.size(); }
+
+    OverlapGroup();
+    explicit OverlapGroup(size_t index, const Event &event);
+    bool isEmpty() const { return indices.empty(); }
+    size_t size() const { return indices.size(); }
+    void addEvent(size_t index, const Event &event);
 };
 
 /**
@@ -66,27 +67,27 @@ public:
     explicit OverlapProcessor(const OverlapConfig& config = OverlapConfig());
     
     // Core overlap detection and processing
+    struct EventPatch {
+        EventVector remove;
+        EventVector add;
+    };
+
     std::vector<OverlapGroup> findOverlapGroups(const EventVector& events) const;
-    Event mergeOverlapGroup(const OverlapGroup& group) const;
+    std::optional<Event> mergeOverlapGroup(const OverlapGroup& group, const EventVector& events) const;
     
     // Frequency calculation methods
-    float calculateWeightedFrequency(const EventVector& overlappingEvents, 
-                                   sv_frame_t overlapStart, 
-                                   sv_frame_t overlapDuration) const;
-    
-    float calculateWeightedFrequency(const Event& prevEvent, 
-                                   const Event& nextEvent,
-                                   sv_frame_t overlapStart, 
-                                   sv_frame_t overlapDuration) const;
+    float calculateWeightedFrequency(const EventVector& overlappingEvents,
+                                     sv_frame_t overlapStart,
+                                     sv_frame_t overlapDuration) const;
     
     // Main processing methods for different model types
-    EventVector processPitchModel(sv_frame_t contextStart, 
-                                std::shared_ptr<SparseTimeValueModel> fromModel, 
-                                std::shared_ptr<SparseTimeValueModel> toModel) const;
-    
-    EventVector processNoteModel(sv_frame_t contextStart, 
-                               std::shared_ptr<NoteModel> fromModel, 
-                               std::shared_ptr<NoteModel> toModel) const;
+    EventPatch processPitchEvents(sv_frame_t contextStart,
+                                  const EventVector& incomingEvents,
+                                  const EventVector& existingEvents) const;
+
+    EventPatch processNoteEvents(sv_frame_t contextStart,
+                                 const EventVector& incomingEvents,
+                                 const EventVector& existingEvents) const;
 
     // Configuration access
     const OverlapConfig& getConfig() const { return m_config; }
@@ -97,11 +98,11 @@ private:
     
     // Helper methods
     bool eventsOverlap(const Event& a, const Event& b) const;
-    const Event* findLongestEvent(const EventVector& events) const;
-    void categorizeEvents(const EventVector& allEvents, 
-                         const EventVector& newEvents,
-                         EventVector& eventsToRemove,
-                         EventVector& remainingEvents) const;
+    const Event* findLongestEvent(const OverlapGroup& group, const EventVector& events) const;
+    void categorizeEvents(const EventVector& allEvents,
+                          const EventVector& newEvents,
+                          EventVector& eventsToRemove,
+                          EventVector& remainingEvents) const;
 };
 
 #endif // OVERLAP_PROCESSOR_H
