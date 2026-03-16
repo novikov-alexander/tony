@@ -24,6 +24,7 @@
 
 #include <map>
 #include <vector>
+#include <optional>
 
 #include "framework/Document.h"
 #include "base/Selection.h"
@@ -267,13 +268,12 @@ protected:
     std::vector<QPointer<sv::Layer>> m_realtimeAnalysisLayers;  // Track temporary layers for cleanup
 
     bool m_realtimeAnalysisInFlight;
-    bool m_havePendingRealtimeSelection;
-    sv::Selection m_pendingRealtimeSelection;
+    std::optional<sv::Selection> m_pendingRealtimeSelection;
     quint64 m_realtimeGeneration;
     int m_currentCandidate;
     bool m_candidatesVisible;
     sv::Document::LayerCreationAsyncHandle m_currentAsyncHandle;
-    QMutex m_asyncMutex;
+    mutable QMutex m_asyncMutex;
 
     QString doAllAnalyses(bool withPitchTrack);
 
@@ -294,6 +294,7 @@ protected:
     void cleanupRealtimeAnalysisLayers();
     void untrackRealtimeAnalysisLayer(sv::Layer *layer);
     void finishRealtimeAnalysisChunk();
+    bool isStaleRealtimeGeneration(quint64 generation) const;
 
     // TODO (alnovi): Move constexpression to a static class
     static constexpr const char* PYIN_PLUGIN_NAME = "pYIN";
