@@ -774,6 +774,12 @@ MainWindow::setupAnalysisMenu()
     connect(m_autoAnalyse, SIGNAL(triggered()), this, SLOT(autoAnalysisToggled()));
     menu->addAction(m_autoAnalyse);
 
+    m_recordPreview = new QAction(tr("Show Pitch Track While &Recording"), this);
+    m_recordPreview->setStatusTip(tr("Fill in the pitch track as a recording is made. The analysis is redone in full when recording stops."));
+    m_recordPreview->setCheckable(true);
+    connect(m_recordPreview, SIGNAL(triggered()), this, SLOT(recordPreviewToggled()));
+    menu->addAction(m_recordPreview);
+
     action = new QAction(tr("&Analyse Now!"), this);
     action->setStatusTip(tr("Trigger analysis of pitches and notes. (This will delete all existing pitches and notes.)"));
     connect(action, SIGNAL(triggered()), this, SLOT(analyseNow()));
@@ -846,7 +852,8 @@ MainWindow::updateAnalyseStates()
         { "precision-analysis", m_precise },
         { "lowamp-analysis", m_lowamp },
         { "onset-analysis", m_onset },
-        { "prune-analysis", m_prune }
+        { "prune-analysis", m_prune },
+        { "record-preview", m_recordPreview }
     };
 
     auto keyMap = Analyser::getAnalysisSettings();
@@ -879,6 +886,54 @@ MainWindow::autoAnalysisToggled()
 
     // make result visible explicitly, in case e.g. we just set the wrong key
     updateAnalyseStates();
+}
+
+void
+MainWindow::recordPreviewToggled()
+{
+    QAction *a = qobject_cast<QAction *>(sender());
+    if (!a) return;
+
+    QSettings settings;
+    settings.beginGroup("Analyser");
+    settings.setValue("record-preview", a->isChecked());
+    settings.endGroup();
+
+    updateAnalyseStates();
+}
+
+void
+MainWindow::recordStatusChanged(bool recording)
+{
+    if (recording) {
+
+        QSettings settings;
+        settings.beginGroup("Analyser");
+        bool preview = settings.value("record-preview", false).toBool();
+        settings.endGroup();
+
+        if (!preview) return;
+
+        QString error = m_analyser->beginRecordingPreview();
+        if (error != "") {
+            SVCERR << "MainWindow::recordStatusChanged: " << error << endl;
+        }
+
+    } else {
+
+        // Everything the preview added is removed here. The pitch and
+        // note layers are then regenerated in full from the completed
+        // recording, exactly as they are without this feature.
+        m_analyser->endRecordingPreview();
+    }
+}
+
+void
+MainWindow::recordDurationChanged(sv_frame_t frame, sv_samplerate_t rate)
+{
+    MainWindowBase::recordDurationChanged(frame, rate);
+
+    m_analyser->recordingPreviewReachedFrame(frame);
 }
 
 void
@@ -1078,6 +1133,8 @@ MainWindow::setupToolbars()
     connect(recordAction, SIGNAL(triggered()), this, SLOT(record()));
     connect(m_recordTarget, SIGNAL(recordStatusChanged(bool)),
 	    recordAction, SLOT(setChecked(bool)));
+    connect(m_recordTarget, SIGNAL(recordStatusChanged(bool)),
+	    this, SLOT(recordStatusChanged(bool)));
     connect(m_recordTarget, SIGNAL(recordCompleted()),
 	    this, SLOT(analyseNow()));
     connect(this, SIGNAL(canRecord(bool)),

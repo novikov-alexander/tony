@@ -89,6 +89,8 @@ protected slots:
     virtual void analyseNow();
     virtual void resetAnalyseOptions();
     virtual void autoAnalysisToggled();
+    virtual void recordPreviewToggled();
+    virtual void recordStatusChanged(bool);
     virtual void precisionAnalysisToggled();
     virtual void lowampAnalysisToggled();
     virtual void onsetAnalysisToggled();
@@ -205,6 +207,7 @@ protected:
     bool           m_intelligentActionOn; // GF: !!! temporary
 
     QAction       *m_autoAnalyse;
+    QAction       *m_recordPreview;
     QAction       *m_precise;
     QAction       *m_lowamp;
     QAction       *m_onset;
@@ -253,6 +256,8 @@ protected:
     virtual void closeEvent(QCloseEvent *e);
     bool checkSaveModified();
     bool waitForInitialAnalysis();
+
+    virtual void recordDurationChanged(sv::sv_frame_t, sv::sv_samplerate_t);
 
     virtual void updateVisibleRangeDisplay(sv::Pane *p) const;
     virtual void updatePositionStatusDisplays() const;
