@@ -1035,12 +1035,20 @@ tony_main_files = [
   'main/Analyser.cpp',
   'main/MainWindow.cpp',
   'main/NetworkPermissionTester.cpp',
+  'main/PreviewChunk.cpp',
+  'main/RecordingPreview.cpp',
 ]
 
 tony_main_moc_files = qt.preprocess(
   moc_headers: [
   'main/MainWindow.h',
   'main/Analyser.h',
+  'main/RecordingPreview.h',
+])
+
+tony_main_test_moc_files = qt.preprocess(
+  moc_headers: [
+  'main/test/TestPreviewChunk.h',
 ])
 
 qt_resource_files = qt.preprocess(
@@ -1211,6 +1219,31 @@ svcore_data_fileio_test_exe = executable(
   win_subsystem: 'console'
 )
 
+tony_main_test_exe = executable(
+  'test-tony-main',
+  tony_main_test_moc_files,
+  'main/PreviewChunk.cpp',
+  'main/test/tony-main-test.cpp',
+  include_directories: [
+    'main',
+  ],
+  dependencies: [
+    svcore_dep,
+    qt_dep,
+    feature_dependencies,
+    dl_dep,
+  ],
+  cpp_args: [
+    feature_defines,
+    general_defines,
+  ],
+  link_args: [
+    feature_additional_libs,
+    general_link_args,
+  ],
+  win_subsystem: 'console'
+)
+
 test('svcore-base', svcore_base_test_exe)
 test('svcore-system', svcore_system_test_exe)
 test('svcore-data-model', svcore_data_model_test_exe)
@@ -1218,6 +1251,7 @@ test('svcore-data-fileio', svcore_data_fileio_test_exe,
      args: [
        '--testdir', meson.current_source_dir() / 'svcore/data/fileio/test'
      ])
+test('tony-main', tony_main_test_exe)
 
 summary({'prefix': get_option('prefix'),
          'bindir': get_option('bindir'),
