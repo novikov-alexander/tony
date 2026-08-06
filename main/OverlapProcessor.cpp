@@ -252,7 +252,21 @@ OverlapProcessor::EventPatch OverlapProcessor::processPitchEvents(sv_frame_t con
                                                                   const EventVector& incomingEvents,
                                                                   const EventVector& existingEvents) const {
     EventPatch patch;
-    EventVector shiftedIncoming = shiftedBy(incomingEvents, contextStart);
+
+    // Incoming pitch frames are NOT shifted, unlike note frames.
+    //
+    // pYIN's smoothedpitchtrack is a FixedSampleRate output, and its
+    // features carry the host-supplied block timestamp verbatim
+    // (PYinVamp.cpp: f.timestamp = m_timestamp[iFrame]). The host feeds
+    // absolute block timestamps, and FeatureExtractionModelTransformer's
+    // FixedSampleRate branch reconstructs the frame from that timestamp,
+    // so these frames are already absolute.
+    //
+    // Its notes output behaves differently -- it counts frames from zero
+    // and ignores the host timestamps -- so processNoteEvents() does have
+    // to shift. Adding contextStart here as well was what put the live
+    // pitch track at roughly twice its correct frame.
+    const EventVector &incoming = incomingEvents;
 
     // Everything from contextStart onwards is superseded by the fresh
     // analysis. We need the latest-ending event before contextStart in
@@ -277,11 +291,11 @@ OverlapProcessor::EventPatch OverlapProcessor::processPitchEvents(sv_frame_t con
 
     sortAndDedupeEvents(patch.remove);
 
-    patch.add = shiftedIncoming;
+    patch.add = incoming;
 
-    if (lastBefore && !shiftedIncoming.empty()) {
+    if (lastBefore && !incoming.empty()) {
 
-        const auto& firstNewEvent = shiftedIncoming.front();
+        const auto& firstNewEvent = incoming.front();
 
         const auto lastExistingEnd =
             lastBefore->getFrame() + lastBefore->getDuration();

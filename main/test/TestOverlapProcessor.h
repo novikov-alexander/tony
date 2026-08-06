@@ -489,6 +489,53 @@ private slots:
     }
 
     // ---- processPitchEvents -----------------------------------------
+    //
+    // Note the asymmetry with processNoteEvents throughout this section:
+    // incoming PITCH frames are absolute and are not shifted, because
+    // pYIN's smoothedpitchtrack echoes the host's absolute block
+    // timestamp, whereas its notes output counts frames from zero. See
+    // pitchAndNoteFrameOriginsDiffer() below.
+
+    void pitchIncomingIsNotShiftedByContextStart() {
+
+        // Regression test. Adding contextStart to the incoming pitch
+        // frames -- correct for notes, wrong for pitch -- put the live
+        // pitch track at roughly twice its true frame, so during
+        // recording it drifted off past the record head.
+        OverlapProcessor p;
+
+        EventVector incoming { pitch(5000, 440.f), pitch(5100, 441.f) };
+
+        auto patch = p.processPitchEvents(5000, incoming, EventVector());
+
+        QCOMPARE(int(patch.add.size()), 2);
+        QCOMPARE(patch.add[0].getFrame(), sv_frame_t(5000));
+        QCOMPARE(patch.add[1].getFrame(), sv_frame_t(5100));
+    }
+
+    void pitchAndNoteFrameOriginsDiffer() {
+
+        // Pins the contract that the two entry points disagree on
+        // purpose. Same contextStart, same nominal event position, two
+        // different frame conventions.
+        OverlapProcessor p;
+
+        const sv_frame_t contextStart = 5000;
+
+        auto pitchPatch = p.processPitchEvents
+            (contextStart, EventVector { pitch(5000, 440.f) }, EventVector());
+
+        auto notePatch = p.processNoteEvents
+            (contextStart, EventVector { note(0, 100, 440.f) }, EventVector());
+
+        QCOMPARE(int(pitchPatch.add.size()), 1);
+        QCOMPARE(int(notePatch.add.size()), 1);
+
+        // Absolute in, absolute out -- unchanged
+        QCOMPARE(pitchPatch.add[0].getFrame(), sv_frame_t(5000));
+        // Relative in, shifted to absolute out
+        QCOMPARE(notePatch.add[0].getFrame(), sv_frame_t(5000));
+    }
 
     void pitchReplacesFromContextStartOnly() {
 
@@ -501,7 +548,7 @@ private slots:
             pitch(1100, 403.f)
         };
 
-        EventVector incoming { pitch(0, 500.f), pitch(100, 501.f) };
+        EventVector incoming { pitch(1000, 500.f), pitch(1100, 501.f) };
 
         auto patch = p.processPitchEvents(1000, incoming, existing);
 
@@ -524,7 +571,7 @@ private slots:
         OverlapProcessor p;   // threshold 512 frames, 10% pitch difference
 
         EventVector existing { pitch(900, 440.f) };
-        EventVector incoming { pitch(100, 445.f) };   // -> frame 1100
+        EventVector incoming { pitch(1100, 445.f) };   // 200-frame gap
 
         auto patch = p.processPitchEvents(1000, incoming, existing);
 
@@ -540,7 +587,7 @@ private slots:
         OverlapProcessor p;
 
         EventVector existing { pitch(0, 440.f) };
-        EventVector incoming { pitch(100, 445.f) };   // gap of 1100 frames
+        EventVector incoming { pitch(1100, 445.f) };   // gap of 1100 frames
 
         auto patch = p.processPitchEvents(1000, incoming, existing);
 
@@ -553,7 +600,7 @@ private slots:
         OverlapProcessor p;
 
         EventVector existing { pitch(900, 440.f) };
-        EventVector incoming { pitch(100, 880.f) };   // an octave up
+        EventVector incoming { pitch(1100, 880.f) };   // an octave up
 
         auto patch = p.processPitchEvents(1000, incoming, existing);
 
@@ -572,7 +619,7 @@ private slots:
         };
 
         OverlapProcessor p;
-        EventVector incoming { pitch(100, 445.f) };
+        EventVector incoming { pitch(1100, 445.f) };
 
         auto patch = p.processPitchEvents(1000, incoming, existing);
 
@@ -600,7 +647,7 @@ private slots:
 
         OverlapProcessor p;
 
-        EventVector incoming { pitch(0, 440.f), pitch(100, 441.f) };
+        EventVector incoming { pitch(1000, 440.f), pitch(1100, 441.f) };
 
         EventVector model;
         model = applyPatch(model, p.processPitchEvents(1000, incoming, model));

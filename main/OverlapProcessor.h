@@ -92,18 +92,29 @@ public:
 
     /**
      * Produce the patch that replaces the pitch track from
-     * contextStart onwards with incomingEvents (whose frames are
-     * relative to contextStart).
+     * contextStart onwards with incomingEvents.
+     *
+     * incomingEvents are expected to carry ABSOLUTE frames, as pYIN's
+     * smoothedpitchtrack output does: it is a FixedSampleRate output
+     * whose features carry the host's block timestamp verbatim, and the
+     * transformer reconstructs the frame from that timestamp. Here
+     * contextStart is only the boundary of the region being replaced,
+     * not an offset to add.
      */
     EventPatch processPitchEvents(sv::sv_frame_t contextStart,
                                   const sv::EventVector& incomingEvents,
                                   const sv::EventVector& existingEvents) const;
 
     /**
-     * Produce the patch that merges incomingEvents (whose frames are
-     * relative to contextStart) into existingEvents. Existing notes
-     * absorbed into a merge are included in the remove list, and
-     * existing notes untouched by the incoming ones are left alone.
+     * Produce the patch that merges incomingEvents into existingEvents.
+     * Existing notes absorbed into a merge are included in the remove
+     * list, and existing notes untouched by the incoming ones are left
+     * alone.
+     *
+     * Unlike processPitchEvents(), incomingEvents are expected to carry
+     * frames RELATIVE to contextStart, as pYIN's notes output does: it
+     * derives its timestamps from a frame index counting from zero and
+     * ignores the host's block timestamps. contextStart is added to them.
      */
     EventPatch processNoteEvents(sv::sv_frame_t contextStart,
                                  const sv::EventVector& incomingEvents,
