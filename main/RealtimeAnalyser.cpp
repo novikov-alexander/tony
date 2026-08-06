@@ -10,6 +10,7 @@
 #include "OverlapProcessor.h"
 
 #include <algorithm>
+#include <functional>
 #include <utility>
 #include <memory>
 #include <iostream>
@@ -187,49 +188,40 @@ RealtimeAnalyser::cleanup()
 {
     std::vector<QPointer<Layer>> layersToClean;
     QPointer<Document> doc;
-    QPointer<Pane> pane;
-    std::optional<Selection> pendingToRestart;
     quint64 newGeneration = 0;
-    bool retiredInFlight = false;
+    bool wasInFlight = false;
+    bool hadPending = false;
 
     {
         QMutexLocker locker(&m_mutex);
 
         layersToClean.swap(m_tempLayers);
 
-        // Invalidate current callbacks and discard any queued follow-up work.
-        // If we are destroying temp layers for an in-flight run, that run can
-        // no longer complete naturally, so retire it here.
-        if (m_inFlight && !layersToClean.empty()) {
-            retiredInFlight = true;
-            m_inFlight = false;
-            pendingToRestart = std::exchange(m_pendingSelection, std::nullopt);
-        } else {
-            m_pendingSelection = std::nullopt;
-        }
+        wasInFlight = m_inFlight;
+        hadPending = m_pendingSelection.has_value();
 
-        ++m_generation;
-        newGeneration = m_generation;
+        // Every caller of cleanup() is reacting to the ground moving --
+        // the document closing, a new file loading, or the target layers
+        // being replaced. Restarting the queued chunk here would schedule
+        // work against state that is being torn down (and, from the
+        // destructor, would connect signals to a half-destroyed object),
+        // so all outstanding work is simply abandoned. Bumping the
+        // generation makes any callback already queued for delivery a
+        // no-op.
+        m_inFlight = false;
+        m_pendingSelection = std::nullopt;
+
+        newGeneration = ++m_generation;
 
         doc = m_ctx.document;
-        pane = m_ctx.pane;
 
         cerr << "RealtimeAnalyser::cleanup: generation=" << newGeneration
-             << " inFlight=" << m_inFlight
-             << " retiredInFlight=" << retiredInFlight
-             << " pending=" << (m_pendingSelection.has_value() ? "yes" : "no")
-             << " restartPending=" << (pendingToRestart.has_value() ? "yes" : "no")
+             << " wasInFlight=" << wasInFlight
+             << " hadPending=" << hadPending
              << " tempLayers=" << layersToClean.size() << endl;
     }
 
-    cleanupTempLayers(std::move(layersToClean), doc, pane);
-
-    if (pendingToRestart) {
-        cerr << "RealtimeAnalyser::cleanup: restarting pending selection after forced retirement"
-             << " start=" << pendingToRestart->getStartFrame()
-             << " end=" << pendingToRestart->getEndFrame() << endl;
-        (void)analyseChunk(*pendingToRestart);
-    }
+    deleteTempLayers(std::move(layersToClean), doc);
 }
 
 void
@@ -244,8 +236,7 @@ RealtimeAnalyser::invalidateGeneration()
     m_pendingSelection = std::nullopt;
 
     cerr << "RealtimeAnalyser::invalidateGeneration: generation=" << m_generation
-         << " inFlight=" << m_inFlight
-         << " pending=" << (m_pendingSelection.has_value() ? "yes" : "no") << endl;
+         << " inFlight=" << m_inFlight << endl;
 }
 
 QString
@@ -267,11 +258,26 @@ RealtimeAnalyser::analyseChunk(Selection sel)
         QMutexLocker locker(&m_mutex);
 
         if (m_inFlight) {
-            m_pendingSelection = sel;
-            cerr << "RealtimeAnalyser::analyseChunk: already in flight, replacing pending selection"
+
+            // Merge rather than replace: recordDurationChanged fires
+            // several times during a single chunk, and simply keeping
+            // the newest selection would leave the frames between the
+            // running chunk's end and the newest chunk's start
+            // permanently unanalysed.
+            if (m_pendingSelection) {
+                m_pendingSelection = Selection
+                    (std::min(m_pendingSelection->getStartFrame(),
+                              sel.getStartFrame()),
+                     std::max(m_pendingSelection->getEndFrame(),
+                              sel.getEndFrame()));
+            } else {
+                m_pendingSelection = sel;
+            }
+
+            cerr << "RealtimeAnalyser::analyseChunk: already in flight, merged into pending selection"
                  << " generation=" << m_generation
-                 << " pendingStart=" << sel.getStartFrame()
-                 << " pendingEnd=" << sel.getEndFrame() << endl;
+                 << " pendingStart=" << m_pendingSelection->getStartFrame()
+                 << " pendingEnd=" << m_pendingSelection->getEndFrame() << endl;
             return "";
         }
 
@@ -303,21 +309,20 @@ RealtimeAnalyser::analyseChunk(Selection sel)
              << " end=" << sel.getEndFrame() << endl;
     }
 
-    waveFileModel = ModelById::getAs<WaveFileModel>(fileModel);
-    if (!waveFileModel) {
-        if (startedChunk) finishChunk();
-        return "Internal error: RealtimeAnalyser::analyseChunk() called with no WaveFileModel";
-    }
-
-    auto finishIfStarted = [this, startedChunk]() {
+    auto finishIfStarted = [this, startedChunk, generation]() {
         if (startedChunk) {
-            finishChunk();
+            finishChunk(generation);
         }
     };
 
+    waveFileModel = ModelById::getAs<WaveFileModel>(fileModel);
+    if (!waveFileModel) {
+        finishIfStarted();
+        return "Internal error: RealtimeAnalyser::analyseChunk() called with no WaveFileModel";
+    }
+
     auto cleanupTempLayer = [this](QPointer<Layer> safeTempLayer,
-                                  QPointer<Document> doc,
-                                  QPointer<Pane> pane) {
+                                   QPointer<Document> doc) {
         Layer *layerToDelete = safeTempLayer.data();
         if (!layerToDelete) return;
 
@@ -326,11 +331,13 @@ RealtimeAnalyser::analyseChunk(Selection sel)
             untrackTempLayerLocked(layerToDelete);
         }
 
-        if (doc && pane) {
-            doc->removeLayerFromView(pane.data(), layerToDelete);
-            if (safeTempLayer) {
-                doc->deleteLayer(layerToDelete);
-            }
+        // Temp layers are never added to a view, so removeLayerFromView()
+        // must not be used here: it would push an undoable
+        // RemoveLayerCommand holding a raw pointer to a layer we are
+        // about to delete, leaving the undo stack full of commands that
+        // dereference freed memory on undo. Delete directly instead.
+        if (doc) {
+            doc->deleteLayer(layerToDelete, true);
         }
     };
 
@@ -344,7 +351,43 @@ RealtimeAnalyser::analyseChunk(Selection sel)
         if (state->remainingParts == 0) {
             cerr << "RealtimeAnalyser::completePart: retiring chunk for generation=" << generation
                  << " finishAllowed=" << canFinish << endl;
-            finishChunk();
+            finishChunk(generation);
+        }
+    };
+
+    // Registers a completion handler for one temp layer. The handler
+    // runs at most once, whether it is reached through the layer's
+    // signal or through the immediate check below -- if the transform
+    // has already finished by the time we get here the signal has been
+    // and gone, and without the check nothing would ever retire the
+    // chunk, leaving m_inFlight stuck true and realtime analysis
+    // silently dead for the rest of the session.
+    auto registerPart = [this, state](Layer *layer,
+                                      std::function<void(ModelId)> handler) {
+
+        ++state->remainingParts;
+
+        auto done = std::make_shared<bool>(false);
+        auto once = [done, handler](ModelId modelId) {
+            if (*done) return;
+            *done = true;
+            handler(modelId);
+        };
+
+        QObject::connect(layer, &Layer::modelCompletionChanged, this,
+                         [once](ModelId modelId) {
+                             auto model = ModelById::get(modelId);
+                             if (!model || model->getCompletion() != 100) return;
+                             once(modelId);
+                         },
+                         Qt::QueuedConnection);
+
+        const ModelId modelId = layer->getModel();
+        auto model = ModelById::get(modelId);
+        if (model && model->getCompletion() == 100) {
+            QMetaObject::invokeMethod(this,
+                                      [once, modelId]() { once(modelId); },
+                                      Qt::QueuedConnection);
         }
     };
 
@@ -426,24 +469,25 @@ RealtimeAnalyser::analyseChunk(Selection sel)
 
     ColourDatabase *cdb = ColourDatabase::getInstance();
 
+    std::vector<Layer *> unrecognised;
+
     for (auto *layer : layers) {
 
         if (auto *tempPitchLayer = qobject_cast<TimeValueLayer *>(layer)) {
 
-            ++state->remainingParts;
             tempPitchLayer->setBaseColour(cdb->getColourIndex(tr("Black")));
 
-            QPointer<TimeValueLayer> safeTempLayer(tempPitchLayer);
+            QPointer<Layer> safeTempLayer(tempPitchLayer);
 
-            QObject::connect(
-                tempPitchLayer,
-                &TimeValueLayer::modelCompletionChanged,
-                this,
-                [this, safeTempLayer, safeTargetPitchLayer, safeDocument, safePane,
-                 sel, state, generation, cleanupTempLayer, completePart](ModelId modelId) {
+            registerPart
+                (tempPitchLayer,
+                 [this, safeTempLayer, safeTargetPitchLayer, safeDocument, safePane,
+                  sel, generation, cleanupTempLayer, completePart](ModelId modelId) {
 
                     const auto fromModel = ModelById::getAs<SparseTimeValueModel>(modelId);
-                    if (!fromModel || fromModel->getCompletion() != 100) {
+                    if (!fromModel) {
+                        cleanupTempLayer(safeTempLayer, safeDocument);
+                        completePart(false);
                         return;
                     }
 
@@ -458,7 +502,7 @@ RealtimeAnalyser::analyseChunk(Selection sel)
                     if (stale) {
                         cerr << "RealtimeAnalyser::analyseChunk: Ignoring stale pitch callback from old generation"
                              << " callbackGeneration=" << generation << endl;
-                        cleanupTempLayer(safeTempLayer, safeDocument, safePane);
+                        cleanupTempLayer(safeTempLayer, safeDocument);
                         completePart(false);
                         return;
                     }
@@ -489,7 +533,7 @@ RealtimeAnalyser::analyseChunk(Selection sel)
                         cerr << "WARNING: RealtimeAnalyser pitch callback - target layer deleted" << endl;
                     }
 
-                    cleanupTempLayer(safeTempLayer, safeDocument, safePane);
+                    cleanupTempLayer(safeTempLayer, safeDocument);
 
                     if (safeTargetPitchLayer && safePane) {
                         safeTargetPitchLayer->layerParametersChanged();
@@ -498,26 +542,23 @@ RealtimeAnalyser::analyseChunk(Selection sel)
                     emit layersChanged();
 
                     completePart(true);
-                },
-                Qt::QueuedConnection);
-        }
+                });
 
-        if (auto *tempNoteLayer = qobject_cast<FlexiNoteLayer *>(layer)) {
+        } else if (auto *tempNoteLayer = qobject_cast<FlexiNoteLayer *>(layer)) {
 
-            ++state->remainingParts;
             tempNoteLayer->setBaseColour(cdb->getColourIndex(tr("Bright Blue")));
 
-            QPointer<FlexiNoteLayer> safeTempLayer(tempNoteLayer);
+            QPointer<Layer> safeTempLayer(tempNoteLayer);
 
-            QObject::connect(
-                tempNoteLayer,
-                &FlexiNoteLayer::modelCompletionChanged,
-                this,
-                [this, safeTempLayer, safeTargetNoteLayer, safeDocument, safePane,
-                 sel, state, generation, cleanupTempLayer, completePart](ModelId modelId) {
+            registerPart
+                (tempNoteLayer,
+                 [this, safeTempLayer, safeTargetNoteLayer, safeDocument,
+                  sel, generation, cleanupTempLayer, completePart](ModelId modelId) {
 
                     const auto fromModel = ModelById::getAs<NoteModel>(modelId);
-                    if (!fromModel || fromModel->getCompletion() != 100) {
+                    if (!fromModel) {
+                        cleanupTempLayer(safeTempLayer, safeDocument);
+                        completePart(false);
                         return;
                     }
 
@@ -532,7 +573,7 @@ RealtimeAnalyser::analyseChunk(Selection sel)
                     if (stale) {
                         cerr << "RealtimeAnalyser::analyseChunk: Ignoring stale note callback from old generation"
                              << " callbackGeneration=" << generation << endl;
-                        cleanupTempLayer(safeTempLayer, safeDocument, safePane);
+                        cleanupTempLayer(safeTempLayer, safeDocument);
                         completePart(false);
                         return;
                     }
@@ -544,6 +585,9 @@ RealtimeAnalyser::analyseChunk(Selection sel)
                         if (toModel) {
                             const auto patch =
                                 processNoteEvents(sel.getStartFrame(), fromModel, toModel);
+
+                            logPatchFrameRange("RealtimeAnalyser::notePatch.remove", patch.remove);
+                            logPatchFrameRange("RealtimeAnalyser::notePatch.add", patch.add);
 
                             for (const Event &p : patch.remove) {
                                 toModel->remove(p);
@@ -558,14 +602,23 @@ RealtimeAnalyser::analyseChunk(Selection sel)
                         cerr << "WARNING: RealtimeAnalyser note callback - target layer deleted" << endl;
                     }
 
-                    cleanupTempLayer(safeTempLayer, safeDocument, safePane);
+                    cleanupTempLayer(safeTempLayer, safeDocument);
 
                     emit layersChanged();
 
                     completePart(true);
-                },
-                Qt::QueuedConnection);
+                });
+
+        } else {
+            unrecognised.push_back(layer);
         }
+    }
+
+    // Anything we can't drive to completion would otherwise sit in
+    // m_tempLayers until the next cleanup()
+    for (auto *layer : unrecognised) {
+        cerr << "WARNING: RealtimeAnalyser::analyseChunk: discarding unrecognised temp layer" << endl;
+        cleanupTempLayer(QPointer<Layer>(layer), safeDocument);
     }
 
     if (state->remainingParts == 0) {
@@ -574,21 +627,6 @@ RealtimeAnalyser::analyseChunk(Selection sel)
     }
 
     return "";
-}
-
-bool
-RealtimeAnalyser::hasValidContextLocked() const
-{
-    return (m_ctx.document && m_ctx.pane &&
-            !m_ctx.fileModel.isNone() &&
-            m_ctx.targetPitchLayer &&
-            m_ctx.targetNoteLayer);
-}
-
-bool
-RealtimeAnalyser::isStaleGenerationLocked(quint64 generation) const
-{
-    return generation != m_generation;
 }
 
 void
@@ -604,33 +642,44 @@ RealtimeAnalyser::untrackTempLayerLocked(Layer *layer)
 }
 
 void
-RealtimeAnalyser::cleanupTempLayers(std::vector<QPointer<Layer>> layersToClean,
-                                   const QPointer<Document> &doc,
-                                   const QPointer<Pane> &pane)
+RealtimeAnalyser::deleteTempLayers(std::vector<QPointer<Layer>> layersToClean,
+                                   const QPointer<Document> &doc)
 {
-    if (!doc || !pane) return;
+    // If the document has already gone it owns and destroys its layers,
+    // so there is nothing left for us to release.
+    if (!doc) return;
 
     for (const auto &layerPtr : layersToClean) {
         Layer *layer = layerPtr.data();
         if (!layer) continue;
 
-        doc->removeLayerFromView(pane.data(), layer);
-        doc->deleteLayer(layer);
+        // See cleanupTempLayer(): these layers were never added to a
+        // view, so they must not go through removeLayerFromView().
+        doc->deleteLayer(layer, true);
     }
 }
 
 void
-RealtimeAnalyser::finishChunk()
+RealtimeAnalyser::finishChunk(quint64 generation)
 {
     std::optional<Selection> pending;
-    quint64 generation = 0;
 
     {
         QMutexLocker locker(&m_mutex);
 
+        if (generation != m_generation) {
+            // A cleanup() or invalidateGeneration() has superseded this
+            // chunk, so it no longer owns the in-flight slot. Clearing
+            // m_inFlight here would release a slot that a newer chunk
+            // may already have taken, letting two chunks write to the
+            // same models at once.
+            cerr << "RealtimeAnalyser::finishChunk: ignoring retirement of stale generation="
+                 << generation << " current=" << m_generation << endl;
+            return;
+        }
+
         m_inFlight = false;
         pending = std::exchange(m_pendingSelection, std::nullopt);
-        generation = m_generation;
 
         cerr << "RealtimeAnalyser::finishChunk: generation=" << generation
              << " pending=" << (pending.has_value() ? "yes" : "no") << endl;

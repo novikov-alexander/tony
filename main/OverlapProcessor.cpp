@@ -14,8 +14,12 @@
 */
 
 #include "OverlapProcessor.h"
+
 #include <algorithm>
 #include <cmath>
+#include <numeric>
+
+using namespace sv;
 
 namespace {
 
@@ -57,13 +61,14 @@ void sortAndDedupeEvents(EventVector &events)
 
 EventVector shiftedBy(const EventVector &events, sv_frame_t offset)
 {
-    EventVector shifted = events;
-    std::transform(shifted.begin(), shifted.end(), shifted.begin(),
-                   [offset](const auto &event) {
-                       return event.withFrame(event.getFrame() + offset);
-                   });
+    EventVector shifted;
+    shifted.reserve(events.size());
+    for (const auto &event : events) {
+        shifted.push_back(event.withFrame(event.getFrame() + offset));
+    }
     return shifted;
 }
+
 }
 
 // OverlapGroup implementation
@@ -97,39 +102,48 @@ OverlapProcessor::OverlapProcessor(const OverlapConfig &config) :
 {
 }
 
-std::vector<OverlapGroup> OverlapProcessor::findOverlapGroups(const EventVector& events) const {
+std::vector<OverlapGroup>
+OverlapProcessor::findOverlapGroups(const EventVector &events) const
+{
     std::vector<OverlapGroup> groups;
-    std::vector<char> processed(events.size(), 0);
+    if (events.size() < 2) return groups;
 
-    for (size_t i = 0; i < events.size(); ++i) {
-        if (processed[i]) continue;
+    // The connected components of an interval overlap graph are
+    // contiguous once the intervals are sorted by start frame, so a
+    // single sweep tracking the running maximum end frame finds them
+    // all. (The previous implementation rescanned the whole event set
+    // after every match, which is cubic in the worst case and was being
+    // run over the entire note track once per realtime chunk.)
 
-        OverlapGroup currentGroup(i, events[i]);
-        processed[i] = true;
+    std::vector<size_t> order(events.size());
+    std::iota(order.begin(), order.end(), size_t(0));
 
-        // Find all events that overlap with any event in the current group
-        bool foundOverlap;
-        do {
-            foundOverlap = false;
-            for (size_t j = 0; j < events.size(); ++j) {
-                if (processed[j]) continue;
+    std::sort(order.begin(), order.end(),
+              [&events](size_t a, size_t b) {
+                  if (events[a].getFrame() != events[b].getFrame()) {
+                      return events[a].getFrame() < events[b].getFrame();
+                  }
+                  return a < b;
+              });
 
-                for (size_t groupIndex : currentGroup.indices) {
-                    if (eventsOverlap(events[j], events[groupIndex])) {
-                        currentGroup.addEvent(j, events[j]);
-                        processed[j] = true;
-                        foundOverlap = true;
-                        break;
-                    }
-                }
-                if (foundOverlap) break;
-            }
-        } while (foundOverlap);
+    OverlapGroup current(order[0], events[order[0]]);
 
-        if (currentGroup.size() > 1) {
-            groups.push_back(currentGroup);
+    for (size_t i = 1; i < order.size(); ++i) {
+
+        const size_t index = order[i];
+        const Event &event = events[index];
+
+        // Equivalent to eventsOverlap() against some group member,
+        // given that no later event can start before this one does.
+        if (event.getFrame() < current.endFrame) {
+            current.addEvent(index, event);
+        } else {
+            if (current.size() > 1) groups.push_back(current);
+            current = OverlapGroup(index, event);
         }
     }
+
+    if (current.size() > 1) groups.push_back(current);
 
     return groups;
 }
@@ -176,7 +190,7 @@ float OverlapProcessor::calculateWeightedFrequency(const EventVector& overlappin
         for (float freq : frequencies) {
             logSum += std::log(freq);
         }
-        return std::exp(logSum / frequencies.size());
+        return float(std::exp(logSum / double(frequencies.size())));
     }
 
     for (double& weight : weights) weight /= totalWeight;
@@ -186,7 +200,7 @@ float OverlapProcessor::calculateWeightedFrequency(const EventVector& overlappin
         weightedLogSum += std::log(frequencies[i]) * weights[i];
     }
 
-    return std::exp(weightedLogSum);
+    return float(std::exp(weightedLogSum));
 }
 
 std::optional<Event> OverlapProcessor::mergeOverlapGroup(const OverlapGroup& group, const EventVector& events) const {
@@ -240,17 +254,24 @@ OverlapProcessor::EventPatch OverlapProcessor::processPitchEvents(sv_frame_t con
     EventPatch patch;
     EventVector shiftedIncoming = shiftedBy(incomingEvents, contextStart);
 
-    EventVector remainingEvents;
+    // Everything from contextStart onwards is superseded by the fresh
+    // analysis. We need the latest-ending event before contextStart in
+    // order to bridge the seam, but not a copy of the whole preceding
+    // track -- this runs once per realtime chunk over the entire pitch
+    // track, which grows for the length of the recording.
+    const Event *lastBefore = nullptr;
+
     patch.remove.reserve(existingEvents.size());
-    remainingEvents.reserve(existingEvents.size());
 
     for (const auto& event : existingEvents) {
         const auto eventStart = event.getFrame();
         const auto eventEnd = eventStart + event.getDuration();
+
         if (eventStart >= contextStart || eventEnd > contextStart) {
             patch.remove.push_back(event);
-        } else {
-            remainingEvents.push_back(event);
+        } else if (!lastBefore ||
+                   eventEnd > lastBefore->getFrame() + lastBefore->getDuration()) {
+            lastBefore = &event;
         }
     }
 
@@ -258,17 +279,17 @@ OverlapProcessor::EventPatch OverlapProcessor::processPitchEvents(sv_frame_t con
 
     patch.add = shiftedIncoming;
 
-    if (!remainingEvents.empty() && !shiftedIncoming.empty()) {
-        const auto& lastExistingEvent = remainingEvents.back();
+    if (lastBefore && !shiftedIncoming.empty()) {
+
         const auto& firstNewEvent = shiftedIncoming.front();
 
         const auto lastExistingEnd =
-            lastExistingEvent.getFrame() + lastExistingEvent.getDuration();
+            lastBefore->getFrame() + lastBefore->getDuration();
         const auto gapFrames = firstNewEvent.getFrame() - lastExistingEnd;
 
         if (gapFrames > 0 && gapFrames <= m_config.interpolationThreshold) {
-            if (lastExistingEvent.hasValue() && firstNewEvent.hasValue()) {
-                const auto lastValue = lastExistingEvent.getValue();
+            if (lastBefore->hasValue() && firstNewEvent.hasValue()) {
+                const auto lastValue = lastBefore->getValue();
                 const auto firstValue = firstNewEvent.getValue();
 
                 if (lastValue > 0.0f && firstValue > 0.0f) {
@@ -293,67 +314,62 @@ OverlapProcessor::EventPatch OverlapProcessor::processNoteEvents(sv_frame_t cont
                                                                  const EventVector& incomingEvents,
                                                                  const EventVector& existingEvents) const {
     EventPatch patch;
-    EventVector shiftedIncoming = shiftedBy(incomingEvents, contextStart);
 
-    EventVector remainingEvents;
-    categorizeEvents(existingEvents, shiftedIncoming, patch.remove, remainingEvents);
-    sortAndDedupeEvents(patch.remove);
+    const EventVector shiftedIncoming = shiftedBy(incomingEvents, contextStart);
+    if (shiftedIncoming.empty()) return patch;
 
-    EventVector combinedEvents;
-    combinedEvents.reserve(remainingEvents.size() + patch.remove.size() + shiftedIncoming.size());
-    combinedEvents.insert(combinedEvents.end(), remainingEvents.begin(), remainingEvents.end());
-    combinedEvents.insert(combinedEvents.end(), patch.remove.begin(), patch.remove.end());
-    combinedEvents.insert(combinedEvents.end(), shiftedIncoming.begin(), shiftedIncoming.end());
+    // Single index space: [0, existingCount) are existing events, the
+    // rest are incoming ones. Overlap grouping is transitive, so an
+    // existing note can be pulled into a merge by way of another
+    // existing note even when it does not itself overlap anything
+    // incoming. It is still superseded by the merged event and must be
+    // removed, or it would be left behind as a duplicate underneath it.
+    const size_t existingCount = existingEvents.size();
 
-    const auto overlapGroups = findOverlapGroups(combinedEvents);
+    EventVector combined;
+    combined.reserve(existingCount + shiftedIncoming.size());
+    combined.insert(combined.end(), existingEvents.begin(), existingEvents.end());
+    combined.insert(combined.end(), shiftedIncoming.begin(), shiftedIncoming.end());
 
-    EventVector finalEvents;
-    finalEvents.reserve(combinedEvents.size());
-    std::vector<char> processed(combinedEvents.size(), 0);
+    const auto groups = findOverlapGroups(combined);
 
-    for (const auto& group : overlapGroups) {
-        if (auto merged = mergeOverlapGroup(group, combinedEvents)) {
-            finalEvents.push_back(*merged);
+    std::vector<char> grouped(combined.size(), 0);
+
+    for (const auto& group : groups) {
+
+        bool touchesIncoming = false;
+        for (size_t index : group.indices) {
+            grouped[index] = 1;
+            if (index >= existingCount) touchesIncoming = true;
+        }
+
+        if (!touchesIncoming) {
+            // Pre-existing notes that overlap only each other, outside
+            // the region we just analysed: leave them exactly as they
+            // are.
+            continue;
         }
 
         for (size_t index : group.indices) {
-            if (index < processed.size()) {
-                processed[index] = true;
-            }
-        }
-    }
-
-    for (size_t i = 0; i < combinedEvents.size(); ++i) {
-        if (!processed[i]) {
-            finalEvents.push_back(combinedEvents[i]);
-        }
-    }
-
-    patch.add.reserve(finalEvents.size());
-    for (const auto& event : finalEvents) {
-        bool include = false;
-
-        for (const auto& originalNew : shiftedIncoming) {
-            if (eventsOverlap(event, originalNew)) {
-                include = true;
-                break;
+            if (index < existingCount) {
+                patch.remove.push_back(combined[index]);
             }
         }
 
-        if (!include) {
-            for (const auto& removedEvent : patch.remove) {
-                if (eventsOverlap(event, removedEvent)) {
-                    include = true;
-                    break;
-                }
-            }
-        }
-
-        if (include) {
-            patch.add.push_back(event);
+        if (auto merged = mergeOverlapGroup(group, combined)) {
+            patch.add.push_back(*merged);
         }
     }
 
+    // Incoming notes that overlapped nothing at all
+    for (size_t i = existingCount; i < combined.size(); ++i) {
+        if (!grouped[i]) patch.add.push_back(combined[i]);
+    }
+
+    // Groups are disjoint, so remove holds each existing event at most
+    // once already; sort for determinism but don't dedupe, so that a
+    // model containing genuine duplicates has both instances removed.
+    std::sort(patch.remove.begin(), patch.remove.end(), lessEventForDedup);
     sortAndDedupeEvents(patch.add);
 
     return patch;
@@ -382,28 +398,4 @@ const Event* OverlapProcessor::findLongestEvent(const OverlapGroup& group, const
         }
     }
     return longestEvent;
-}
-
-void OverlapProcessor::categorizeEvents(const EventVector& allEvents,
-                                      const EventVector& newEvents,
-                                      EventVector& eventsToRemove,
-                                      EventVector& remainingEvents) const {
-    eventsToRemove.reserve(allEvents.size());
-    remainingEvents.reserve(allEvents.size());
-
-    for (const auto& event : allEvents) {
-        bool potentialOverlap = false;
-        for (const auto& newEvent : newEvents) {
-            if (eventsOverlap(event, newEvent)) {
-                potentialOverlap = true;
-                break;
-            }
-        }
-
-        if (potentialOverlap) {
-            eventsToRemove.push_back(event);
-        } else {
-            remainingEvents.push_back(event);
-        }
-    }
 }

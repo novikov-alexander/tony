@@ -118,6 +118,9 @@ MainWindow::MainWindow(AudioMode audioMode,
     m_ffwdAction(0),
     m_rwdAction(0),
     m_intelligentActionOn(true), //GF: !!! temporary
+    m_autoAnalyse(nullptr),
+    m_analyseDuringRecord(nullptr),
+    m_analyseAfterRecord(nullptr),
     m_activityLog(new ActivityLog()),
     m_keyReference(new KeyReference()),
     m_selectionAnchor(0),
@@ -843,7 +846,9 @@ MainWindow::resetAnalyseOptions()
     QSettings settings;
     settings.beginGroup("Analyser");
 
-    setRecordingAnalysisMode(RecordingAnalysisMode::AfterRecording);
+    settings.setValue("auto-analysis", true);
+    settings.setValue("recording-analysis-mode",
+                      static_cast<int>(RecordingAnalysisMode::AfterRecording));
 
     auto keyMap = Analyser::getAnalysisSettings();
     for (auto p: keyMap) {
@@ -883,21 +888,23 @@ MainWindow::updateAnalyseStates()
 
     // Handle recording analysis mode with enum-based approach
     RecordingAnalysisMode mode = getRecordingAnalysisMode();
-    
+
     switch (mode) {
         case RecordingAnalysisMode::AfterRecording:
             m_analyseAfterRecord->setChecked(true);
             m_analyseDuringRecord->setChecked(false);
-            m_autoAnalyse->setChecked(true);
-            m_autoAnalyse->setEnabled(true);
             break;
         case RecordingAnalysisMode::DuringRecording:
             m_analyseDuringRecord->setChecked(true);
             m_analyseAfterRecord->setChecked(false);
-            m_autoAnalyse->setChecked(false);
-            m_autoAnalyse->setEnabled(false);
             break;
     }
+
+    // Auto-analysis of newly opened files is independent of the
+    // recording analysis mode: newFileLoaded() reads this key directly,
+    // so deriving the checkbox from the mode instead would leave the two
+    // permanently out of step.
+    m_autoAnalyse->setChecked(settings.value("auto-analysis", true).toBool());
 
     std::map<QString, QAction *> actions {
         { "precision-analysis", m_precise },
@@ -1159,12 +1166,12 @@ MainWindow::setupToolbars()
     connect(recordAction, SIGNAL(triggered()), this, SLOT(record()));
 
     connect(recordAction, SIGNAL(triggered()),
-          this, SLOT(analyseDuringRecordingRunner()));
+            this, SLOT(analyseDuringRecordingRunner()));
 
     connect(m_recordTarget, SIGNAL(recordStatusChanged(bool)),
             recordAction, SLOT(setChecked(bool)));
     connect(m_recordTarget, SIGNAL(recordCompleted()),
-            this, SLOT(analyseNow()));
+            this, SLOT(analyseAfterRecording()));
     connect(this, SIGNAL(canRecord(bool)),
             recordAction, SLOT(setEnabled(bool)));
 
@@ -3131,27 +3138,84 @@ MainWindow::analyseNow()
 }
 
 void
+MainWindow::disconnectRecordingAnalysis()
+{
+    if (m_recordDurationConnection) {
+        disconnect(m_recordDurationConnection);
+        m_recordDurationConnection = QMetaObject::Connection();
+    }
+    if (m_recordCompletedConnection) {
+        disconnect(m_recordCompletedConnection);
+        m_recordCompletedConnection = QMetaObject::Connection();
+    }
+}
+
+void
 MainWindow::analyseDuringRecordingRunner()
 {
-    QSettings settings;
-    settings.beginGroup("Analyser");
-    bool recordAnalyse = settings.value("record-analysis", true).toBool();
-    settings.endGroup();
-    if ((recordAnalyse && this->m_recordTarget->isRecording()))
-    {
-        connect(this->m_recordTarget, &AudioCallbackRecordTarget::recordDurationChanged, this, &MainWindow::analyseDuringRecording);
-        connect(this->m_recordTarget, &AudioCallbackRecordTarget::recordCompleted, this, [this]() {
-            disconnect(this->m_recordTarget, &AudioCallbackRecordTarget::recordDurationChanged, nullptr, nullptr);
-            disconnect(this->m_recordTarget, &AudioCallbackRecordTarget::recordCompleted, nullptr, nullptr);
-            analyseDuringRecording();
-        });
+    if (!m_recordTarget) return;
+    if (!m_recordTarget->isRecording()) return;
+
+    if (getRecordingAnalysisMode() != RecordingAnalysisMode::DuringRecording) {
+        return;
     }
+
+    // Defensive: the record action can only be triggered once per
+    // recording, but re-running would otherwise stack up duplicate
+    // connections
+    disconnectRecordingAnalysis();
+
+    m_recordDurationConnection =
+        connect(m_recordTarget, &AudioCallbackRecordTarget::recordDurationChanged,
+                this, &MainWindow::analyseDuringRecording);
+
+    m_recordCompletedConnection =
+        connect(m_recordTarget, &AudioCallbackRecordTarget::recordCompleted,
+                this, [this]() {
+                    // Only our own two connections, by handle. Passing
+                    // nullptr receivers to disconnect() here used to take
+                    // out MainWindowBase's record-duration display and
+                    // the recordCompleted -> analyseAfterRecording()
+                    // connection along with them, for the rest of the
+                    // session.
+                    disconnectRecordingAnalysis();
+                    analyseDuringRecording();
+                });
 }
 
 void
 MainWindow::analyseDuringRecording()
 {
-    m_analyser->analyseRecordingToEnd(m_recordTarget->getRecordDuration());
+    if (!m_recordTarget || !m_analyser) return;
+
+    QString error = m_analyser->analyseRecordingToEnd
+        (m_recordTarget->getRecordDuration());
+
+    // This runs several times a second while recording, so report
+    // failures to the log rather than to a modal dialog
+    if (error != "") {
+        SVCERR << "MainWindow::analyseDuringRecording: " << error << endl;
+    }
+}
+
+void
+MainWindow::analyseAfterRecording()
+{
+    // If realtime analysis is running, the final chunk is analysed by
+    // the recordCompleted handler installed in
+    // analyseDuringRecordingRunner(). Running a full re-analysis as well
+    // would replace the pitch and note layers out from under the chunk
+    // being scheduled at the same moment.
+    //
+    // This tests the live connection rather than re-reading the mode,
+    // so that switching mode part-way through a recording can't leave
+    // both paths active. We run before that handler does (we were
+    // connected first), so the connection is still valid here.
+    if (m_recordCompletedConnection) {
+        return;
+    }
+
+    analyseNow();
 }
 
 void

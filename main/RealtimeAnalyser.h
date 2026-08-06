@@ -14,6 +14,7 @@
 #include <QtGlobal>
 #include <QString>
 
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -43,13 +44,28 @@ public:
 
     void clearContext();
 
-    // Cancels in-flight work, clears pending selection, removes temp layers, bumps generation
+    /**
+     * Abandon all in-flight and pending work, delete any temporary
+     * layers, and bump the generation so that callbacks still queued
+     * for delivery are ignored. Never starts new work, so it is safe to
+     * call from a destructor or while tearing down a document.
+     */
     void cleanup();
 
-    // Ignore stale callbacks after external state changes; does not delete layers
+    /**
+     * Ignore stale callbacks after external state changes, and drop any
+     * pending follow-up chunk. Does not delete layers, and does not
+     * retire the in-flight chunk: that chunk still owns the in-flight
+     * slot and must retire itself through completion.
+     */
     void invalidateGeneration();
 
-    // One-in-flight realtime analysis: if a chunk is already running, replaces the pending selection
+    /**
+     * One-in-flight realtime analysis. If a chunk is already running,
+     * the selection is merged into the pending one -- rather than
+     * replacing it, which would drop the region between them -- and is
+     * analysed when the running chunk retires.
+     */
     QString analyseChunk(sv::Selection sel);
 
 signals:
@@ -73,15 +89,11 @@ private:
     static constexpr const char* PYIN_F0_OUT = "smoothedpitchtrack";
     static constexpr const char* PYIN_NOTE_OUT = "notes";
 
-    bool hasValidContextLocked() const;
-    bool isStaleGenerationLocked(quint64 generation) const;
-
     void untrackTempLayerLocked(sv::Layer *layer);
-    void cleanupTempLayers(std::vector<QPointer<sv::Layer>> layersToClean,
-                           const QPointer<sv::Document> &doc,
-                           const QPointer<sv::Pane> &pane);
+    void deleteTempLayers(std::vector<QPointer<sv::Layer>> layersToClean,
+                          const QPointer<sv::Document> &doc);
 
-    void finishChunk();
+    void finishChunk(quint64 generation);
 
 private:
     mutable QMutex m_mutex;

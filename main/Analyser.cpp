@@ -110,6 +110,14 @@ Analyser::newFileLoaded(Document *doc, ModelId model,
     m_paneStack = paneStack;
     m_pane = pane;
 
+    // Realtime analysis progress is relative to this model. Recording a
+    // second time reaches us through here rather than through
+    // fileClosed(), so without this reset the first chunk of the new
+    // recording would be analysed from the *previous* recording's end
+    // frame -- which Selection silently turns into a large backwards
+    // range, wiping the new pitch track.
+    m_analysedFrames = 0;
+
     if (m_realtimeAnalyser) {
         // Targets are (re)created later in addAnalyses(); set minimal context now
         m_realtimeAnalyser->setContext(m_document, m_fileModel, m_pane, nullptr, nullptr);
@@ -163,12 +171,20 @@ Analyser::analyseRecordingToEnd(sv_frame_t record_duration)
     if (m_fileModel.isNone()) return "Internal error: Analyser::analyseRecordingToEnd() called with no model present";
 
     // We start with a 2500-frame overlap to ensure we capture instrument attacks in time (~56ms)
-    sv_frame_t overlap = 2500;
-    auto startPosition = std::max(m_analysedFrames - overlap, 0LL);
-    auto endPosition = record_duration;
-    Selection analysingSelection = Selection(startPosition, endPosition);
+    const sv_frame_t overlap = 2500;
+    const sv_frame_t startPosition = std::max(m_analysedFrames - overlap,
+                                              sv_frame_t(0));
+    const sv_frame_t endPosition = record_duration;
 
-    this->analyseRecording(analysingSelection);
+    if (endPosition <= startPosition) {
+        // Nothing new to analyse. Selection would silently swap the two
+        // frames and hand us a large backwards range, so bail out
+        // instead of leaving that to be discovered downstream.
+        return "";
+    }
+
+    QString error = analyseRecording(Selection(startPosition, endPosition));
+    if (error != "") return error;
 
     m_analysedFrames = endPosition;
 
@@ -226,9 +242,10 @@ Analyser::fileClosed()
     m_currentAsyncHandle = 0;
 
     if (m_realtimeAnalyser) {
+        // cleanup() already abandons outstanding work and bumps the
+        // generation, so it is safe to drop the context straight after
         m_realtimeAnalyser->cleanup();
         m_realtimeAnalyser->clearContext();
-        m_realtimeAnalyser->invalidateGeneration();
     }
 
     m_layers.clear();

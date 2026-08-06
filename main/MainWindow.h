@@ -96,6 +96,7 @@ protected slots:
 
     virtual void analyseDuringRecording();
     virtual void analyseDuringRecordingRunner();
+    virtual void analyseAfterRecording();
     virtual void resetAnalyseOptions();
     virtual void recordAnalysisToggled();
     virtual void analyseAfterRecordToggled();
@@ -263,6 +264,15 @@ protected:
 
     RecordingAnalysisMode getRecordingAnalysisMode() const;
     void setRecordingAnalysisMode(RecordingAnalysisMode mode);
+
+    // Tear down only the connections analyseDuringRecordingRunner()
+    // made. A blanket disconnect on m_recordTarget's signals would also
+    // remove MainWindowBase's record-duration handler and our own
+    // recordCompleted handler, permanently.
+    void disconnectRecordingAnalysis();
+
+    QMetaObject::Connection m_recordDurationConnection;
+    QMetaObject::Connection m_recordCompletedConnection;
 
     virtual void octaveShift(bool up);
 

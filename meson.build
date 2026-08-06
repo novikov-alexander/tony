@@ -186,8 +186,7 @@ elif system == 'darwin'
   rc = []
 
   general_defines += [
-    '-mmacosx-version-min=10.15',
-    '-D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_NONE'
+    '-mmacosx-version-min=10.15'
   ]
   general_link_args += [
     '-mmacosx-version-min=10.15'
@@ -758,6 +757,11 @@ svcore_data_fileio_test_moc_files = qt.preprocess(
   'svcore/data/fileio/test/CSVStreamWriterTest.h',
 ])
 
+tony_main_test_moc_files = qt.preprocess(
+  moc_headers: [
+  'main/test/TestOverlapProcessor.h',
+])
+
 svgui_files = [
   'svgui/layer/Colour3DPlotExporter.cpp',
   'svgui/layer/Colour3DPlotLayer.cpp',
@@ -1203,6 +1207,31 @@ svcore_data_fileio_test_exe = executable(
   win_subsystem: 'console'
 )
 
+tony_main_test_exe = executable(
+  'test-tony-main',
+  tony_main_test_moc_files,
+  'main/OverlapProcessor.cpp',
+  'main/test/tony-main-test.cpp',
+  include_directories: [
+    'main',
+  ],
+  dependencies: [
+    svcore_dep,
+    qt_dep,
+    feature_dependencies,
+    dl_dep,
+  ],
+  cpp_args: [
+    feature_defines,
+    general_defines,
+  ],
+  link_args: [
+    feature_additional_libs,
+    general_link_args,
+  ],
+  win_subsystem: 'console'
+)
+
 test('svcore-base', svcore_base_test_exe)
 test('svcore-system', svcore_system_test_exe)
 test('svcore-data-model', svcore_data_model_test_exe)
@@ -1210,6 +1239,7 @@ test('svcore-data-fileio', svcore_data_fileio_test_exe,
      args: [
        '--testdir', meson.current_source_dir() / 'svcore/data/fileio/test'
      ])
+test('tony-main', tony_main_test_exe)
 
 summary({'prefix': get_option('prefix'),
          'bindir': get_option('bindir'),

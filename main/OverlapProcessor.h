@@ -20,89 +20,111 @@
 #include <cstddef>
 #include <optional>
 
+#include "base/BaseTypes.h"
 #include "base/Event.h"
-
-namespace sv {
-    typedef std::vector<Event> EventVector;
-    typedef int64_t sv_frame_t;
-}
-
-using namespace sv;
 
 /**
  * Configuration parameters for overlap processing algorithms
  */
 struct OverlapConfig {
-    sv_frame_t interpolationThreshold = 512;  // ~11ms at 44.1kHz
-    double pitchSimilarityThreshold = 0.1;    // 10% pitch difference threshold
-    sv_frame_t overlapTolerance = 1000;       // Tolerance for event matching
-    
+    sv::sv_frame_t interpolationThreshold = 512;  // ~11ms at 44.1kHz
+    double pitchSimilarityThreshold = 0.1;        // 10% pitch difference threshold
+
     OverlapConfig() = default;
-    OverlapConfig(sv_frame_t interpThresh, double pitchThresh, sv_frame_t tolerance)
+    OverlapConfig(sv::sv_frame_t interpThresh, double pitchThresh)
         : interpolationThreshold(interpThresh)
-        , pitchSimilarityThreshold(pitchThresh)
-        , overlapTolerance(tolerance) {}
+        , pitchSimilarityThreshold(pitchThresh) {}
 };
 
 /**
- * Structure to represent a group of overlapping events
+ * Structure to represent a group of overlapping events. The indices
+ * refer to positions within the event vector the group was derived
+ * from; startFrame and endFrame span the whole group.
  */
 struct OverlapGroup {
     std::vector<size_t> indices;
-    sv_frame_t startFrame;
-    sv_frame_t endFrame;
+    sv::sv_frame_t startFrame;
+    sv::sv_frame_t endFrame;
 
     OverlapGroup();
-    explicit OverlapGroup(size_t index, const Event &event);
+    explicit OverlapGroup(size_t index, const sv::Event &event);
     bool isEmpty() const { return indices.empty(); }
     size_t size() const { return indices.size(); }
-    void addEvent(size_t index, const Event &event);
+    void addEvent(size_t index, const sv::Event &event);
 };
 
 /**
- * Main overlap processing class that handles detection and merging of overlapping events
+ * Main overlap processing class that handles detection and merging of
+ * overlapping events.
+ *
+ * The process*Events methods are pure functions of their inputs: they
+ * return the set of events to remove from, and add to, the target
+ * model, without touching any model themselves.
  */
 class OverlapProcessor {
 public:
     explicit OverlapProcessor(const OverlapConfig& config = OverlapConfig());
-    
-    // Core overlap detection and processing
+
     struct EventPatch {
-        EventVector remove;
-        EventVector add;
+        sv::EventVector remove;
+        sv::EventVector add;
     };
 
-    std::vector<OverlapGroup> findOverlapGroups(const EventVector& events) const;
-    std::optional<Event> mergeOverlapGroup(const OverlapGroup& group, const EventVector& events) const;
-    
-    // Frequency calculation methods
-    float calculateWeightedFrequency(const EventVector& overlappingEvents,
-                                     sv_frame_t overlapStart,
-                                     sv_frame_t overlapDuration) const;
-    
-    // Main processing methods for different model types
-    EventPatch processPitchEvents(sv_frame_t contextStart,
-                                  const EventVector& incomingEvents,
-                                  const EventVector& existingEvents) const;
+    /**
+     * Return the connected components of the overlap graph over the
+     * given events, omitting any component with only one member. Two
+     * events overlap if their half-open frame ranges intersect;
+     * grouping is transitive, so A-B and B-C yields one group {A,B,C}.
+     */
+    std::vector<OverlapGroup> findOverlapGroups(const sv::EventVector& events) const;
 
-    EventPatch processNoteEvents(sv_frame_t contextStart,
-                                 const EventVector& incomingEvents,
-                                 const EventVector& existingEvents) const;
+    /**
+     * Collapse a group into a single event spanning the whole group,
+     * taking its label and level from the longest member and its value
+     * from the duration-weighted geometric mean of the members.
+     */
+    std::optional<sv::Event> mergeOverlapGroup(const OverlapGroup& group,
+                                               const sv::EventVector& events) const;
 
-    // Configuration access
+    float calculateWeightedFrequency(const sv::EventVector& overlappingEvents,
+                                     sv::sv_frame_t overlapStart,
+                                     sv::sv_frame_t overlapDuration) const;
+
+    /**
+     * Produce the patch that replaces the pitch track from
+     * contextStart onwards with incomingEvents (whose frames are
+     * relative to contextStart).
+     */
+    EventPatch processPitchEvents(sv::sv_frame_t contextStart,
+                                  const sv::EventVector& incomingEvents,
+                                  const sv::EventVector& existingEvents) const;
+
+    /**
+     * Produce the patch that merges incomingEvents (whose frames are
+     * relative to contextStart) into existingEvents. Existing notes
+     * absorbed into a merge are included in the remove list, and
+     * existing notes untouched by the incoming ones are left alone.
+     */
+    EventPatch processNoteEvents(sv::sv_frame_t contextStart,
+                                 const sv::EventVector& incomingEvents,
+                                 const sv::EventVector& existingEvents) const;
+
+    /**
+     * The pairwise overlap predicate that grouping is the transitive
+     * closure of: true if the half-open ranges [frame, frame+duration)
+     * of a and b intersect. Events that merely touch end-to-end do not
+     * overlap.
+     */
+    bool eventsOverlap(const sv::Event& a, const sv::Event& b) const;
+
     const OverlapConfig& getConfig() const { return m_config; }
     void setConfig(const OverlapConfig& config) { m_config = config; }
 
 private:
     OverlapConfig m_config;
-    
-    // Helper methods
-    bool eventsOverlap(const Event& a, const Event& b) const;
-    const Event* findLongestEvent(const OverlapGroup& group, const EventVector& events) const;
-    void categorizeEvents(const EventVector& allEvents,
-                          const EventVector& newEvents,
-                          EventVector& eventsToRemove,
-                          EventVector& remainingEvents) const;
+
+    const sv::Event* findLongestEvent(const OverlapGroup& group,
+                                      const sv::EventVector& events) const;
 };
 
 #endif // OVERLAP_PROCESSOR_H
