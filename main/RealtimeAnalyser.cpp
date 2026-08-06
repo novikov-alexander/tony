@@ -39,6 +39,26 @@ using namespace sv;
 // Global overlap processor instance for efficient processing (same as previously in Analyser.cpp)
 static OverlapProcessor s_overlapProcessor;
 
+static void logPatchFrameRange(const char *label,
+                               const EventVector &events)
+{
+    if (events.empty()) {
+        cerr << label << ": empty" << endl;
+        return;
+    }
+
+    auto minFrame = events.front().getFrame();
+    auto maxFrame = events.front().getFrame() + events.front().getDuration();
+    for (const auto &event : events) {
+        minFrame = std::min(minFrame, event.getFrame());
+        maxFrame = std::max(maxFrame, event.getFrame() + event.getDuration());
+    }
+
+    cerr << label << ": count=" << events.size()
+         << " start=" << minFrame
+         << " end=" << maxFrame << endl;
+}
+
 // Wrapper functions
 static OverlapProcessor::EventPatch processPitchEvents(sv_frame_t contextStart,
                                                        const std::shared_ptr<SparseTimeValueModel> &fromModel,
@@ -168,23 +188,48 @@ RealtimeAnalyser::cleanup()
     std::vector<QPointer<Layer>> layersToClean;
     QPointer<Document> doc;
     QPointer<Pane> pane;
+    std::optional<Selection> pendingToRestart;
+    quint64 newGeneration = 0;
+    bool retiredInFlight = false;
 
     {
         QMutexLocker locker(&m_mutex);
 
         layersToClean.swap(m_tempLayers);
 
-        // Ensure we never block future work after cleanup
-        m_inFlight = false;
-        m_pendingSelection = std::nullopt;
+        // Invalidate current callbacks and discard any queued follow-up work.
+        // If we are destroying temp layers for an in-flight run, that run can
+        // no longer complete naturally, so retire it here.
+        if (m_inFlight && !layersToClean.empty()) {
+            retiredInFlight = true;
+            m_inFlight = false;
+            pendingToRestart = std::exchange(m_pendingSelection, std::nullopt);
+        } else {
+            m_pendingSelection = std::nullopt;
+        }
 
         ++m_generation;
+        newGeneration = m_generation;
 
         doc = m_ctx.document;
         pane = m_ctx.pane;
+
+        cerr << "RealtimeAnalyser::cleanup: generation=" << newGeneration
+             << " inFlight=" << m_inFlight
+             << " retiredInFlight=" << retiredInFlight
+             << " pending=" << (m_pendingSelection.has_value() ? "yes" : "no")
+             << " restartPending=" << (pendingToRestart.has_value() ? "yes" : "no")
+             << " tempLayers=" << layersToClean.size() << endl;
     }
 
     cleanupTempLayers(std::move(layersToClean), doc, pane);
+
+    if (pendingToRestart) {
+        cerr << "RealtimeAnalyser::cleanup: restarting pending selection after forced retirement"
+             << " start=" << pendingToRestart->getStartFrame()
+             << " end=" << pendingToRestart->getEndFrame() << endl;
+        (void)analyseChunk(*pendingToRestart);
+    }
 }
 
 void
@@ -193,10 +238,14 @@ RealtimeAnalyser::invalidateGeneration()
     QMutexLocker locker(&m_mutex);
 
     // If we invalidate generation, any existing callbacks become stale.
-    // Also ensure we don't keep "in-flight" latched forever.
+    // Do not clear m_inFlight here: the owning run must retire itself via
+    // completion so we don't break the in-flight/pending state machine.
     ++m_generation;
-    m_inFlight = false;
     m_pendingSelection = std::nullopt;
+
+    cerr << "RealtimeAnalyser::invalidateGeneration: generation=" << m_generation
+         << " inFlight=" << m_inFlight
+         << " pending=" << (m_pendingSelection.has_value() ? "yes" : "no") << endl;
 }
 
 QString
@@ -219,7 +268,10 @@ RealtimeAnalyser::analyseChunk(Selection sel)
 
         if (m_inFlight) {
             m_pendingSelection = sel;
-            cerr << "RealtimeAnalyser::analyseChunk: already in flight, replacing pending selection" << endl;
+            cerr << "RealtimeAnalyser::analyseChunk: already in flight, replacing pending selection"
+                 << " generation=" << m_generation
+                 << " pendingStart=" << sel.getStartFrame()
+                 << " pendingEnd=" << sel.getEndFrame() << endl;
             return "";
         }
 
@@ -244,6 +296,11 @@ RealtimeAnalyser::analyseChunk(Selection sel)
         safeTargetPitchLayer = m_ctx.targetPitchLayer;
         safeTargetNoteLayer = m_ctx.targetNoteLayer;
         fileModel = m_ctx.fileModel;
+
+        cerr << "RealtimeAnalyser::analyseChunk: acquired in-flight slot"
+             << " generation=" << generation
+             << " start=" << sel.getStartFrame()
+             << " end=" << sel.getEndFrame() << endl;
     }
 
     waveFileModel = ModelById::getAs<WaveFileModel>(fileModel);
@@ -279,9 +336,14 @@ RealtimeAnalyser::analyseChunk(Selection sel)
 
     auto state = std::make_shared<RealtimeChunkState>();
 
-    auto completePart = [this, state](bool canFinish) {
+    auto completePart = [this, state, generation](bool canFinish) {
         --state->remainingParts;
-        if (canFinish && state->remainingParts == 0) {
+        cerr << "RealtimeAnalyser::completePart: generation=" << generation
+             << " canFinish=" << canFinish
+             << " remainingParts=" << state->remainingParts << endl;
+        if (state->remainingParts == 0) {
+            cerr << "RealtimeAnalyser::completePart: retiring chunk for generation=" << generation
+                 << " finishAllowed=" << canFinish << endl;
             finishChunk();
         }
     };
@@ -394,7 +456,8 @@ RealtimeAnalyser::analyseChunk(Selection sel)
                     }
 
                     if (stale) {
-                        cerr << "RealtimeAnalyser::analyseChunk: Ignoring stale pitch callback from old generation" << endl;
+                        cerr << "RealtimeAnalyser::analyseChunk: Ignoring stale pitch callback from old generation"
+                             << " callbackGeneration=" << generation << endl;
                         cleanupTempLayer(safeTempLayer, safeDocument, safePane);
                         completePart(false);
                         return;
@@ -407,6 +470,11 @@ RealtimeAnalyser::analyseChunk(Selection sel)
                         if (toModel) {
                             const auto patch =
                                 processPitchEvents(sel.getStartFrame(), fromModel, toModel);
+
+                            cerr << "RealtimeAnalyser::pitchPatch: selectionStart=" << sel.getStartFrame()
+                                 << " selectionEnd=" << sel.getEndFrame() << endl;
+                            logPatchFrameRange("RealtimeAnalyser::pitchPatch.remove", patch.remove);
+                            logPatchFrameRange("RealtimeAnalyser::pitchPatch.add", patch.add);
 
                             for (const Event &p : patch.remove) {
                                 toModel->remove(p);
@@ -423,6 +491,10 @@ RealtimeAnalyser::analyseChunk(Selection sel)
 
                     cleanupTempLayer(safeTempLayer, safeDocument, safePane);
 
+                    if (safeTargetPitchLayer && safePane) {
+                        safeTargetPitchLayer->layerParametersChanged();
+                        safePane->layerParametersChanged();
+                    }
                     emit layersChanged();
 
                     completePart(true);
@@ -458,7 +530,8 @@ RealtimeAnalyser::analyseChunk(Selection sel)
                     }
 
                     if (stale) {
-                        cerr << "RealtimeAnalyser::analyseChunk: Ignoring stale note callback from old generation" << endl;
+                        cerr << "RealtimeAnalyser::analyseChunk: Ignoring stale note callback from old generation"
+                             << " callbackGeneration=" << generation << endl;
                         cleanupTempLayer(safeTempLayer, safeDocument, safePane);
                         completePart(false);
                         return;
@@ -550,16 +623,23 @@ void
 RealtimeAnalyser::finishChunk()
 {
     std::optional<Selection> pending;
+    quint64 generation = 0;
 
     {
         QMutexLocker locker(&m_mutex);
 
         m_inFlight = false;
         pending = std::exchange(m_pendingSelection, std::nullopt);
+        generation = m_generation;
+
+        cerr << "RealtimeAnalyser::finishChunk: generation=" << generation
+             << " pending=" << (pending.has_value() ? "yes" : "no") << endl;
     }
 
     if (pending) {
-        cerr << "RealtimeAnalyser::finishChunk: starting pending realtime selection" << endl;
+        cerr << "RealtimeAnalyser::finishChunk: starting pending realtime selection"
+             << " start=" << pending->getStartFrame()
+             << " end=" << pending->getEndFrame() << endl;
         (void)analyseChunk(*pending);
     }
 }
