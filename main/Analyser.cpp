@@ -164,6 +164,12 @@ Analyser::recordingPreviewReachedFrame(sv_frame_t frame)
     m_recordingPreview->recordedTo(frame);
 }
 
+bool
+Analyser::isRecordingPreviewActive() const
+{
+    return m_recordingPreview->isActive();
+}
+
 void
 Analyser::endRecordingPreview()
 {

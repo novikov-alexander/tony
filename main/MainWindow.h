@@ -234,6 +234,10 @@ protected:
     bool m_withSonification;
     bool m_withSpectrogram;
 
+    // Preview is started on the first duration update rather than when
+    // recording starts; this stops us retrying every update if it fails
+    bool m_recordPreviewAttempted;
+
     Analyser::FrequencyRange m_pendingConstraint;
 
     QString exportToSVL(QString path, sv::Layer *layer);

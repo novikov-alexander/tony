@@ -74,6 +74,11 @@ public:
     void recordingPreviewReachedFrame(sv::sv_frame_t frame);
 
     /**
+     * Return true if a recording preview is currently running.
+     */
+    bool isRecordingPreviewActive() const;
+
+    /**
      * Stop previewing and remove everything the preview added.
      */
     void endRecordingPreview();

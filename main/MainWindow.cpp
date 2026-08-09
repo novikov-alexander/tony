@@ -122,7 +122,8 @@ MainWindow::MainWindow(AudioMode audioMode,
     m_keyReference(new KeyReference()),
     m_selectionAnchor(0),
     m_withSonification(withSonification),
-    m_withSpectrogram(withSpectrogram)
+    m_withSpectrogram(withSpectrogram),
+    m_recordPreviewAttempted(false)
 {
     setWindowTitle(QApplication::applicationName());
 
@@ -906,6 +907,32 @@ void
 MainWindow::recordStatusChanged(bool recording)
 {
     if (recording) {
+        m_recordPreviewAttempted = false;
+        return;
+    }
+
+    // Everything the preview added is removed here. The pitch and note
+    // layers are then regenerated in full from the completed recording,
+    // exactly as they are without this feature.
+    m_analyser->endRecordingPreview();
+}
+
+void
+MainWindow::recordDurationChanged(sv_frame_t frame, sv_samplerate_t rate)
+{
+    MainWindowBase::recordDurationChanged(frame, rate);
+
+    if (!m_analyser->isRecordingPreviewActive()) {
+
+        if (m_recordPreviewAttempted) return;
+        m_recordPreviewAttempted = true;
+
+        // Not started on recordStatusChanged(true): that is emitted from
+        // startRecording(), before record() has closed the old session,
+        // created the new document, set the main model and built the
+        // analysis layers. Starting there would attach the preview to
+        // the session that is about to be discarded. By the time the
+        // first duration update arrives all of that has happened.
 
         QSettings settings;
         settings.beginGroup("Analyser");
@@ -916,22 +943,11 @@ MainWindow::recordStatusChanged(bool recording)
 
         QString error = m_analyser->beginRecordingPreview();
         if (error != "") {
-            SVCERR << "MainWindow::recordStatusChanged: " << error << endl;
+            SVCERR << "MainWindow::recordDurationChanged: unable to preview: "
+                   << error << endl;
+            return;
         }
-
-    } else {
-
-        // Everything the preview added is removed here. The pitch and
-        // note layers are then regenerated in full from the completed
-        // recording, exactly as they are without this feature.
-        m_analyser->endRecordingPreview();
     }
-}
-
-void
-MainWindow::recordDurationChanged(sv_frame_t frame, sv_samplerate_t rate)
-{
-    MainWindowBase::recordDurationChanged(frame, rate);
 
     m_analyser->recordingPreviewReachedFrame(frame);
 }
