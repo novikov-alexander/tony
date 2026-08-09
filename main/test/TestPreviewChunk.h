@@ -182,6 +182,42 @@ private slots:
         QVERIFY(recordedTo - at < MIN);
     }
 
+    void addedEventsStaySortedAcrossPasses() {
+
+        // RecordingPreview relies on this: it prunes its record of added
+        // events from the region start and then appends that region's
+        // events, so the record stays sorted by frame and can be pruned
+        // by binary search rather than by scanning. That matters because
+        // the record reaches six figures over a long recording and is
+        // pruned on every pass.
+        const sv_frame_t revisit = 66150;
+        const sv_frame_t step = 20000;
+
+        sv_frame_t analysedTo = 0;
+        sv_frame_t recordedTo = 0;
+        sv_frame_t lastFrom = -1;
+
+        for (int pass = 0; pass < 40; ++pass) {
+
+            recordedTo += step;
+
+            auto r = PreviewChunk::nextRange(analysedTo, recordedTo,
+                                             MIN, MAX, revisit);
+            if (!r) continue;
+
+            // The region start must never go backwards, or a prune
+            // would leave later events in front of earlier ones
+            QVERIFY(r->from >= lastFrom);
+            lastFrom = r->from;
+
+            // and must not exceed where we had reached, or a pass would
+            // leave a gap it never fills
+            QVERIFY(r->from <= analysedTo);
+
+            analysedTo = r->to;
+        }
+    }
+
     // ---- withinRange ------------------------------------------------
 
     void withinRangeKeepsEventsInside() {

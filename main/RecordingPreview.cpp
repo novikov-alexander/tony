@@ -183,8 +183,13 @@ RecordingPreview::startPass(const PreviewChunk::Range &range)
             complete = false;
             continue;
         }
+        // Queued: completionChanged is emitted from the transform's own
+        // thread, and the handler releases the model that emitted it.
+        // Going through the event loop keeps us from doing that while
+        // the signal is still being delivered.
         connect(model.get(), SIGNAL(completionChanged(ModelId)),
-                this, SLOT(transformCompletionChanged(ModelId)));
+                this, SLOT(transformCompletionChanged(ModelId)),
+                Qt::QueuedConnection);
         if (model->getCompletion() != 100) complete = false;
     }
 
@@ -294,8 +299,10 @@ RecordingPreview::releaseTransforms()
                        this, SLOT(transformCompletionChanged(ModelId)));
         }
 
-        // cancel() waits for the transform's thread to exit, so the
-        // model is no longer in use by the time we release it
+        // Unconditionally, including when the transform has already
+        // reported completion: reaching 100 happens inside run(), so the
+        // thread may still be tearing down. cancel() waits for it to
+        // exit, which is what makes it safe to release the model here.
         ModelTransformerFactory::getInstance()->cancel(output);
         ModelById::release(output);
     }
@@ -312,10 +319,15 @@ RecordingPreview::removeAddedFrom(sv_frame_t frame)
     bool noteUsable = (noteTarget && m_targetNoteLayer &&
                        m_targetNoteLayer->getModel() == m_targetNoteModel);
 
+    // Each pass prunes from its region start and then appends that
+    // region's events in order, and the region start only ever moves
+    // forward, so these stay sorted by frame. That lets us find the
+    // cut point rather than scanning: this runs on every pass, and the
+    // vectors reach six figures over a long take.
     auto prune = [frame](EventVector &added, bool usable, auto target) {
-        auto split = std::stable_partition
-            (added.begin(), added.end(),
-             [frame](const Event &e) { return e.getFrame() < frame; });
+        auto split = std::lower_bound
+            (added.begin(), added.end(), frame,
+             [](const Event &e, sv_frame_t f) { return e.getFrame() < f; });
         if (usable) {
             for (auto i = split; i != added.end(); ++i) {
                 target->remove(*i);
