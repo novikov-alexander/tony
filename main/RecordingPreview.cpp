@@ -22,7 +22,11 @@
 #include "transform/ModelTransformerFactory.h"
 #include "data/model/WaveFileModel.h"
 #include "data/model/SparseTimeValueModel.h"
+#include "data/model/NoteModel.h"
 #include "layer/TimeValueLayer.h"
+#include "layer/FlexiNoteLayer.h"
+
+#include <algorithm>
 
 using namespace sv;
 
@@ -38,16 +42,24 @@ RecordingPreview::RecordingPreview(QObject *parent) :
 
 RecordingPreview::~RecordingPreview()
 {
-    cancelTransform();
+    releaseTransforms();
+}
+
+sv_frame_t
+RecordingPreview::toFrames(double seconds) const
+{
+    return sv_frame_t(seconds * m_sampleRate);
 }
 
 QString
-RecordingPreview::begin(ModelId sourceModel, TimeValueLayer *targetLayer)
+RecordingPreview::begin(ModelId sourceModel,
+                        TimeValueLayer *targetPitchLayer,
+                        FlexiNoteLayer *targetNoteLayer)
 {
     abandon();
 
-    if (!targetLayer) {
-        return "Internal error: RecordingPreview::begin() called with no target layer";
+    if (!targetPitchLayer && !targetNoteLayer) {
+        return "Internal error: RecordingPreview::begin() called with no target layers";
     }
 
     auto source = ModelById::getAs<WaveFileModel>(sourceModel);
@@ -55,25 +67,35 @@ RecordingPreview::begin(ModelId sourceModel, TimeValueLayer *targetLayer)
         return "Internal error: RecordingPreview::begin() called with no source model";
     }
 
-    QString transformId = QString("%1%2").arg(PYIN_TRANSFORM_BASE).arg(PYIN_F0_OUTPUT);
+    TransformFactory *tf = TransformFactory::getInstance();
 
-    if (!TransformFactory::getInstance()->haveTransform(transformId)) {
+    QString f0Id = QString("%1%2").arg(PYIN_TRANSFORM_BASE).arg(PYIN_F0_OUTPUT);
+    QString noteId = QString("%1%2").arg(PYIN_TRANSFORM_BASE).arg(PYIN_NOTE_OUTPUT);
+
+    if (!tf->haveTransform(f0Id) || !tf->haveTransform(noteId)) {
         return tr("Transform \"%1\" not found. Unable to preview analysis while "
                   "recording.<br><br>Is the pYIN Vamp plugin correctly installed?")
-            .arg(transformId);
+            .arg(f0Id);
     }
 
     m_sourceModel = sourceModel;
     m_sampleRate = source->getSampleRate();
-    m_targetLayer = targetLayer;
-    m_targetModel = targetLayer->getModel();
+
+    m_targetPitchLayer = targetPitchLayer;
+    m_targetPitchModel = targetPitchLayer ? targetPitchLayer->getModel() : ModelId();
+
+    m_targetNoteLayer = targetNoteLayer;
+    m_targetNoteModel = targetNoteLayer ? targetNoteLayer->getModel() : ModelId();
+
     m_analysedTo = 0;
     m_recordedTo = 0;
-    m_added.clear();
+    m_addedPitch.clear();
+    m_addedNotes.clear();
     m_active = true;
 
-    SVDEBUG << "RecordingPreview::begin: previewing into model "
-            << m_targetModel << endl;
+    SVDEBUG << "RecordingPreview::begin: previewing into pitch model "
+            << m_targetPitchModel << " and note model " << m_targetNoteModel
+            << endl;
 
     return "";
 }
@@ -87,21 +109,23 @@ RecordingPreview::recordedTo(sv_frame_t frame)
         m_recordedTo = frame;
     }
 
-    if (!m_transformOutput.isNone()) {
-        // A chunk is already running; it will pick up the new mark when
+    if (!m_pitchOutput.isNone() || !m_noteOutput.isNone()) {
+        // A pass is already running; it will pick up the new mark when
         // it finishes
         return;
     }
 
     auto range = PreviewChunk::nextRange(m_analysedTo, m_recordedTo,
-                                         MIN_CHUNK_FRAMES, MAX_CHUNK_FRAMES);
+                                         toFrames(MIN_CHUNK_SECONDS),
+                                         toFrames(MAX_CHUNK_SECONDS),
+                                         toFrames(REVISIT_SECONDS));
     if (range) {
-        startChunk(*range);
+        startPass(*range);
     }
 }
 
 void
-RecordingPreview::startChunk(const PreviewChunk::Range &range)
+RecordingPreview::startPass(const PreviewChunk::Range &range)
 {
     auto source = ModelById::getAs<WaveFileModel>(m_sourceModel);
     if (!source) {
@@ -109,138 +133,199 @@ RecordingPreview::startChunk(const PreviewChunk::Range &range)
         return;
     }
 
-    QString transformId = QString("%1%2").arg(PYIN_TRANSFORM_BASE).arg(PYIN_F0_OUTPUT);
+    TransformFactory *tf = TransformFactory::getInstance();
 
-    Transform transform = TransformFactory::getInstance()->
-        getDefaultTransformFor(transformId, m_sampleRate);
+    QString f0Id = QString("%1%2").arg(PYIN_TRANSFORM_BASE).arg(PYIN_F0_OUTPUT);
 
+    Transform transform = tf->getDefaultTransformFor(f0Id, m_sampleRate);
     transform.setStepSize(PYIN_STEP_SIZE);
     transform.setBlockSize(PYIN_BLOCK_SIZE);
-
     transform.setStartTime(RealTime::frame2RealTime(range.from, m_sampleRate));
     transform.setDuration(RealTime::frame2RealTime(range.length(), m_sampleRate));
 
+    // Both outputs from a single run of the plugin: transformMultiple
+    // requires transforms differing only in output identifier
+    Transforms transforms;
+    transforms.push_back(transform);
+    transform.setOutput(PYIN_NOTE_OUTPUT);
+    transforms.push_back(transform);
+
     QString message;
 
-    // Not Document::createDerivedLayer: we want the output model only,
-    // with no layer, no registration with the document and nothing added
-    // to the undo history. The model returned here belongs to us.
-    ModelId output = ModelTransformerFactory::getInstance()->
-        transform(transform, ModelTransformer::Input(m_sourceModel), message);
+    // Not Document::createDerivedLayers: we want the output models only,
+    // with no layers, no registration with the document and nothing
+    // added to the undo history. The models returned here belong to us.
+    std::vector<ModelId> outputs = ModelTransformerFactory::getInstance()->
+        transformMultiple(transforms, ModelTransformer::Input(m_sourceModel),
+                          message);
 
-    if (output.isNone()) {
-        SVDEBUG << "RecordingPreview::startChunk: transform failed: "
+    if (outputs.size() < 2) {
+        SVDEBUG << "RecordingPreview::startPass: transform failed: "
                 << message << endl;
+        for (ModelId id: outputs) {
+            ModelTransformerFactory::getInstance()->cancel(id);
+            ModelById::release(id);
+        }
         // Move past this region rather than retrying it forever
         m_analysedTo = range.to;
         return;
     }
 
-    m_transformOutput = output;
+    m_pitchOutput = outputs[0];
+    m_noteOutput = outputs[1];
     m_currentRange = range;
 
-    auto model = ModelById::get(output);
-    if (!model) {
-        m_transformOutput = {};
-        return;
+    bool complete = true;
+
+    for (ModelId id: { m_pitchOutput, m_noteOutput }) {
+        auto model = ModelById::get(id);
+        if (!model) {
+            complete = false;
+            continue;
+        }
+        connect(model.get(), SIGNAL(completionChanged(ModelId)),
+                this, SLOT(transformCompletionChanged(ModelId)));
+        if (model->getCompletion() != 100) complete = false;
     }
 
-    connect(model.get(), SIGNAL(completionChanged(ModelId)),
-            this, SLOT(transformCompletionChanged(ModelId)));
-
-    // The transform may have finished already, in which case the signal
-    // has been and gone and nothing further would arrive
-    if (model->getCompletion() == 100) {
-        collectChunk();
+    // The transforms may have finished already, in which case the
+    // signals have been and gone and nothing further would arrive
+    if (complete) {
+        collectPass();
     }
 }
 
 void
-RecordingPreview::transformCompletionChanged(ModelId modelId)
+RecordingPreview::transformCompletionChanged(ModelId)
 {
-    if (modelId != m_transformOutput) return;
+    if (m_pitchOutput.isNone() || m_noteOutput.isNone()) return;
 
-    auto model = ModelById::get(modelId);
-    if (!model || model->getCompletion() != 100) return;
+    for (ModelId id: { m_pitchOutput, m_noteOutput }) {
+        auto model = ModelById::get(id);
+        if (!model || model->getCompletion() != 100) return;
+    }
 
-    collectChunk();
+    collectPass();
 }
 
 void
-RecordingPreview::collectChunk()
+RecordingPreview::collectPass()
 {
-    auto output = ModelById::getAs<SparseTimeValueModel>(m_transformOutput);
-    auto target = ModelById::getAs<SparseTimeValueModel>(m_targetModel);
+    const PreviewChunk::Range range = m_currentRange;
 
-    if (output && target && m_targetLayer &&
-        m_targetLayer->getModel() == m_targetModel) {
+    auto pitchOut = ModelById::getAs<SparseTimeValueModel>(m_pitchOutput);
+    auto noteOut = ModelById::getAs<NoteModel>(m_noteOutput);
 
-        // pYIN's smoothedpitchtrack output carries the host's block
-        // timestamps, so these frames are already absolute. withinRange
-        // discards anything that isn't, rather than trusting it.
-        EventVector events = PreviewChunk::withinRange
-            (output->getAllEvents(), m_currentRange);
+    EventVector pitchEvents, noteEvents;
 
-        for (const Event &e: events) {
-            target->add(e);
-            m_added.push_back(e);
+    if (pitchOut) {
+        // pYIN's smoothedpitchtrack is a fixed-sample-rate output whose
+        // features carry the host's block timestamps, so these frames
+        // are already absolute.
+        pitchEvents = PreviewChunk::withinRange(pitchOut->getAllEvents(), range);
+    }
+
+    if (noteOut) {
+        // The notes output is different: it is variable-sample-rate and
+        // derives its timestamps from a frame index counting from zero,
+        // ignoring the host's block timestamps, so these frames are
+        // relative to the start of the analysed region.
+        EventVector relative = noteOut->getAllEvents();
+        noteEvents.reserve(relative.size());
+        for (const Event &e: relative) {
+            noteEvents.push_back(e.withFrame(e.getFrame() + range.from));
+        }
+        noteEvents = PreviewChunk::withinRange(noteEvents, range);
+    }
+
+    releaseTransforms();
+
+    // Replace, rather than merge: drop whatever we put in this region
+    // last time before adding what we have now
+    removeAddedFrom(range.from);
+
+    auto pitchTarget = ModelById::getAs<SparseTimeValueModel>(m_targetPitchModel);
+    if (pitchTarget && m_targetPitchLayer &&
+        m_targetPitchLayer->getModel() == m_targetPitchModel) {
+        for (const Event &e: pitchEvents) {
+            pitchTarget->add(e);
+            m_addedPitch.push_back(e);
+        }
+    }
+
+    auto noteTarget = ModelById::getAs<NoteModel>(m_targetNoteModel);
+    if (noteTarget && m_targetNoteLayer &&
+        m_targetNoteLayer->getModel() == m_targetNoteModel) {
+        for (const Event &e: noteEvents) {
+            noteTarget->add(e);
+            m_addedNotes.push_back(e);
+        }
+    }
+
+    m_analysedTo = range.to;
+
+    if (!pitchEvents.empty() || !noteEvents.empty()) {
+        emit previewUpdated();
+    }
+
+    // Pick up anything that arrived while this pass was running
+    auto next = PreviewChunk::nextRange(m_analysedTo, m_recordedTo,
+                                        toFrames(MIN_CHUNK_SECONDS),
+                                        toFrames(MAX_CHUNK_SECONDS),
+                                        toFrames(REVISIT_SECONDS));
+    if (next) {
+        startPass(*next);
+    }
+}
+
+void
+RecordingPreview::releaseTransforms()
+{
+    for (ModelId *id: { &m_pitchOutput, &m_noteOutput }) {
+
+        if (id->isNone()) continue;
+
+        ModelId output = *id;
+        *id = {};
+
+        auto model = ModelById::get(output);
+        if (model) {
+            disconnect(model.get(), SIGNAL(completionChanged(ModelId)),
+                       this, SLOT(transformCompletionChanged(ModelId)));
         }
 
-        if (!events.empty()) {
-            emit previewUpdated();
-        }
-    }
-
-    m_analysedTo = m_currentRange.to;
-
-    cancelTransform();
-
-    // Pick up anything that arrived while this chunk was running
-    auto range = PreviewChunk::nextRange(m_analysedTo, m_recordedTo,
-                                         MIN_CHUNK_FRAMES, MAX_CHUNK_FRAMES);
-    if (range) {
-        startChunk(*range);
+        // cancel() waits for the transform's thread to exit, so the
+        // model is no longer in use by the time we release it
+        ModelTransformerFactory::getInstance()->cancel(output);
+        ModelById::release(output);
     }
 }
 
 void
-RecordingPreview::cancelTransform()
+RecordingPreview::removeAddedFrom(sv_frame_t frame)
 {
-    if (m_transformOutput.isNone()) return;
+    auto pitchTarget = ModelById::getAs<SparseTimeValueModel>(m_targetPitchModel);
+    bool pitchUsable = (pitchTarget && m_targetPitchLayer &&
+                        m_targetPitchLayer->getModel() == m_targetPitchModel);
 
-    ModelId output = m_transformOutput;
-    m_transformOutput = {};
+    auto noteTarget = ModelById::getAs<NoteModel>(m_targetNoteModel);
+    bool noteUsable = (noteTarget && m_targetNoteLayer &&
+                       m_targetNoteLayer->getModel() == m_targetNoteModel);
 
-    auto model = ModelById::get(output);
-    if (model) {
-        disconnect(model.get(), SIGNAL(completionChanged(ModelId)),
-                   this, SLOT(transformCompletionChanged(ModelId)));
-    }
-
-    // cancel() waits for the transform's thread to exit, so the model is
-    // no longer in use by the time we release it
-    ModelTransformerFactory::getInstance()->cancel(output);
-    ModelById::release(output);
-}
-
-void
-RecordingPreview::removeAddedEvents()
-{
-    if (m_added.empty()) return;
-
-    // Only if the model we wrote into is still the one the layer is
-    // using. If the full re-analysis has already replaced it, our points
-    // went with it and there is nothing to undo.
-    if (m_targetLayer && m_targetLayer->getModel() == m_targetModel) {
-        auto target = ModelById::getAs<SparseTimeValueModel>(m_targetModel);
-        if (target) {
-            for (const Event &e: m_added) {
-                target->remove(e);
+    auto prune = [frame](EventVector &added, bool usable, auto target) {
+        auto split = std::stable_partition
+            (added.begin(), added.end(),
+             [frame](const Event &e) { return e.getFrame() < frame; });
+        if (usable) {
+            for (auto i = split; i != added.end(); ++i) {
+                target->remove(*i);
             }
         }
-    }
+        added.erase(split, added.end());
+    };
 
-    m_added.clear();
+    prune(m_addedPitch, pitchUsable, pitchTarget);
+    prune(m_addedNotes, noteUsable, noteTarget);
 }
 
 void
@@ -248,27 +333,35 @@ RecordingPreview::end()
 {
     if (!m_active) return;
 
-    SVDEBUG << "RecordingPreview::end: removing " << m_added.size()
-            << " preview point(s)" << endl;
+    SVDEBUG << "RecordingPreview::end: removing " << m_addedPitch.size()
+            << " preview pitch point(s) and " << m_addedNotes.size()
+            << " preview note(s)" << endl;
 
-    cancelTransform();
-    removeAddedEvents();
+    releaseTransforms();
+
+    // Everything, from frame zero
+    removeAddedFrom(0);
 
     m_active = false;
-    m_targetLayer = nullptr;
-    m_targetModel = {};
+    m_targetPitchLayer = nullptr;
+    m_targetNoteLayer = nullptr;
+    m_targetPitchModel = {};
+    m_targetNoteModel = {};
     m_sourceModel = {};
 }
 
 void
 RecordingPreview::abandon()
 {
-    cancelTransform();
+    releaseTransforms();
 
-    m_added.clear();
+    m_addedPitch.clear();
+    m_addedNotes.clear();
     m_active = false;
-    m_targetLayer = nullptr;
-    m_targetModel = {};
+    m_targetPitchLayer = nullptr;
+    m_targetNoteLayer = nullptr;
+    m_targetPitchModel = {};
+    m_targetNoteModel = {};
     m_sourceModel = {};
     m_analysedTo = 0;
     m_recordedTo = 0;

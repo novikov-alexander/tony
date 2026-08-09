@@ -155,7 +155,10 @@ Analyser::beginRecordingPreview()
         return "Internal error: Analyser::beginRecordingPreview() has no pitch track layer";
     }
 
-    return m_recordingPreview->begin(m_fileModel, pitchLayer);
+    FlexiNoteLayer *noteLayer =
+        qobject_cast<FlexiNoteLayer *>(m_layers[Notes]);
+
+    return m_recordingPreview->begin(m_fileModel, pitchLayer, noteLayer);
 }
 
 void

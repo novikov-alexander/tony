@@ -23,7 +23,8 @@ std::optional<Range>
 nextRange(sv_frame_t analysedTo,
           sv_frame_t recordedTo,
           sv_frame_t minFrames,
-          sv_frame_t maxFrames)
+          sv_frame_t maxFrames,
+          sv_frame_t revisitFrames)
 {
     if (analysedTo < 0) analysedTo = 0;
 
@@ -41,7 +42,10 @@ nextRange(sv_frame_t analysedTo,
         to = analysedTo + maxFrames;
     }
 
-    return Range { analysedTo, to };
+    sv_frame_t from = analysedTo - revisitFrames;
+    if (from < 0) from = 0;
+
+    return Range { from, to };
 }
 
 EventVector

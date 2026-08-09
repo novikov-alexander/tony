@@ -26,10 +26,11 @@
 
 namespace sv {
 class TimeValueLayer;
+class FlexiNoteLayer;
 }
 
 /**
- * Fills in the pitch track as a recording is made, so that the
+ * Fills in the pitch track and notes as a recording is made, so that the
  * performer can see something while singing or playing.
  *
  * This is only ever a preview. When the recording stops, the pitch and
@@ -37,18 +38,26 @@ class TimeValueLayer;
  * Document::replaceModel, via MainWindowBase's refreshModel call), so
  * nothing produced here survives into the saved session. Accordingly
  * this class removes everything it added when the recording finishes,
- * leaving the pitch track exactly as it would have been without it.
+ * leaving the layers exactly as they would have been without it.
  *
- * Each chunk is analysed by running a pYIN transform over one region of
- * the recording so far. The regions are adjacent and never overlap, so
- * the results are simply concatenated. Only one transform runs at a
- * time; duration updates that arrive while one is running raise the
- * mark for the next chunk rather than starting another.
+ * Each pass runs a pYIN transform over one region of the recording so
+ * far, and the regions overlap: each pass revisits a short tail of the
+ * previous one and replaces the preview's contents there. Notes have
+ * duration and would otherwise be cut in two wherever a region boundary
+ * fell inside one; revisiting lets the note tracker see the surrounding
+ * audio and emit the note whole. Because everything drawn here belongs
+ * to the preview, replacing a region is a delete followed by an add,
+ * with nothing to merge and no heuristic choosing between overlapping
+ * notes.
  *
- * The transform output model is obtained from ModelTransformerFactory
- * rather than from Document, so it belongs to us: no layer is created
- * for it, it is not registered with the document, and nothing is added
- * to the undo history.
+ * Only one transform runs at a time. Duration updates arriving while one
+ * is running raise the mark for the next pass rather than starting
+ * another.
+ *
+ * The output models come from ModelTransformerFactory rather than from
+ * Document, so they belong to us: no layer is created for them, they are
+ * not registered with the document, and nothing is added to the undo
+ * history.
  */
 class RecordingPreview : public QObject
 {
@@ -59,27 +68,30 @@ public:
     virtual ~RecordingPreview();
 
     /**
-     * Begin previewing into the given pitch layer, analysing the given
-     * source (recording) model. Returns "" on success or an error
-     * string on failure.
+     * Begin previewing into the given layers, analysing the given source
+     * (recording) model. Either target layer may be null, in which case
+     * that part of the preview is skipped. Returns "" on success or an
+     * error string on failure.
      */
-    QString begin(sv::ModelId sourceModel, sv::TimeValueLayer *targetLayer);
+    QString begin(sv::ModelId sourceModel,
+                  sv::TimeValueLayer *targetPitchLayer,
+                  sv::FlexiNoteLayer *targetNoteLayer);
 
     /**
-     * Note that the recording has reached the given frame. Starts a
-     * chunk if one is not already running and there is enough new audio.
+     * Note that the recording has reached the given frame. Starts a pass
+     * if one is not already running and there is enough new audio.
      */
     void recordedTo(sv::sv_frame_t frame);
 
     /**
-     * The recording has finished: cancel any running analysis and
-     * remove every point this preview added.
+     * The recording has finished: cancel any running analysis and remove
+     * everything this preview added.
      */
     void end();
 
     /**
-     * Abandon the preview without touching the target, for use when the
-     * target is being replaced anyway.
+     * Abandon the preview without touching the targets, for use when
+     * they are being replaced anyway.
      */
     void abandon();
 
@@ -92,41 +104,53 @@ protected slots:
     void transformCompletionChanged(sv::ModelId);
 
 protected:
-    void startChunk(const PreviewChunk::Range &range);
-    void collectChunk();
-    void cancelTransform();
-    void removeAddedEvents();
+    void startPass(const PreviewChunk::Range &range);
+    void collectPass();
+    void releaseTransforms();
+    void removeAddedFrom(sv::sv_frame_t frame);
 
-    // ~0.25s at 44.1kHz: long enough that starting a transform is worth
-    // it, short enough to feel responsive
-    static const sv::sv_frame_t MIN_CHUNK_FRAMES = 11025;
+    // Enough new audio to be worth starting a transform for, but short
+    // enough to feel responsive
+    static constexpr double MIN_CHUNK_SECONDS = 0.25;
 
-    // Bound the work in any single chunk, so that a stall produces
-    // several ordinary chunks rather than one very long one
-    static const sv::sv_frame_t MAX_CHUNK_FRAMES = 220500;
+    // Bound the work in a single pass, so a stall produces several
+    // ordinary passes rather than one very long one
+    static constexpr double MAX_CHUNK_SECONDS = 5.0;
+
+    // How much of the previous pass to re-analyse and replace. Needs to
+    // comfortably exceed the length of a note for notes to come out
+    // whole across a boundary.
+    static constexpr double REVISIT_SECONDS = 1.5;
 
     static const int PYIN_STEP_SIZE = 256;
     static const int PYIN_BLOCK_SIZE = 2048;
 
     static constexpr const char *PYIN_TRANSFORM_BASE = "vamp:pyin:pyin:";
     static constexpr const char *PYIN_F0_OUTPUT = "smoothedpitchtrack";
+    static constexpr const char *PYIN_NOTE_OUTPUT = "notes";
+
+    sv::sv_frame_t toFrames(double seconds) const;
 
     bool m_active;
 
     sv::ModelId m_sourceModel;
     sv::sv_samplerate_t m_sampleRate;
 
-    QPointer<sv::TimeValueLayer> m_targetLayer;
-    sv::ModelId m_targetModel;
+    QPointer<sv::TimeValueLayer> m_targetPitchLayer;
+    sv::ModelId m_targetPitchModel;
+    sv::EventVector m_addedPitch;
 
-    sv::ModelId m_transformOutput;
+    QPointer<sv::FlexiNoteLayer> m_targetNoteLayer;
+    sv::ModelId m_targetNoteModel;
+    sv::EventVector m_addedNotes;
+
+    sv::ModelId m_pitchOutput;
+    sv::ModelId m_noteOutput;
+
     PreviewChunk::Range m_currentRange;
 
     sv::sv_frame_t m_analysedTo;
     sv::sv_frame_t m_recordedTo;
-
-    // Exactly what we added, so that we can take exactly that away again
-    sv::EventVector m_added;
 };
 
 #endif

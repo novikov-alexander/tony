@@ -40,20 +40,20 @@ private slots:
 
     void nothingRecordedYet() {
 
-        QCOMPARE(PreviewChunk::nextRange(0, 0, MIN, MAX).has_value(), false);
+        QCOMPARE(PreviewChunk::nextRange(0, 0, MIN, MAX, 0).has_value(), false);
     }
 
     void tooLittleNewAudio() {
 
         // Duration notifications arrive far more often than it is worth
         // starting a transform
-        QCOMPARE(PreviewChunk::nextRange(0, MIN - 1, MIN, MAX).has_value(),
+        QCOMPARE(PreviewChunk::nextRange(0, MIN - 1, MIN, MAX, 0).has_value(),
                  false);
     }
 
     void exactlyEnoughNewAudio() {
 
-        auto r = PreviewChunk::nextRange(0, MIN, MIN, MAX);
+        auto r = PreviewChunk::nextRange(0, MIN, MIN, MAX, 0);
         QVERIFY(r.has_value());
         QCOMPARE(r->from, sv_frame_t(0));
         QCOMPARE(r->to, MIN);
@@ -63,10 +63,10 @@ private slots:
 
         // Adjacent and non-overlapping, so results can simply be
         // concatenated with nothing to merge
-        auto first = PreviewChunk::nextRange(0, 50000, MIN, MAX);
+        auto first = PreviewChunk::nextRange(0, 50000, MIN, MAX, 0);
         QVERIFY(first.has_value());
 
-        auto second = PreviewChunk::nextRange(first->to, 100000, MIN, MAX);
+        auto second = PreviewChunk::nextRange(first->to, 100000, MIN, MAX, 0);
         QVERIFY(second.has_value());
 
         QCOMPARE(second->from, first->to);
@@ -78,7 +78,7 @@ private slots:
         // A duration notification that arrives out of order, or a
         // recording that restarts, must not make the preview rewrite
         // what it has already drawn
-        QCOMPARE(PreviewChunk::nextRange(100000, 50000, MIN, MAX).has_value(),
+        QCOMPARE(PreviewChunk::nextRange(100000, 50000, MIN, MAX, 0).has_value(),
                  false);
     }
 
@@ -86,7 +86,7 @@ private slots:
 
         // If analysis falls a long way behind we want several ordinary
         // chunks rather than one enormous one
-        auto r = PreviewChunk::nextRange(0, MAX * 3, MIN, MAX);
+        auto r = PreviewChunk::nextRange(0, MAX * 3, MIN, MAX, 0);
         QVERIFY(r.has_value());
         QCOMPARE(r->from, sv_frame_t(0));
         QCOMPARE(r->to, MAX);
@@ -102,7 +102,7 @@ private slots:
         sv_frame_t at = 0;
         int iterations = 0;
 
-        while (auto r = PreviewChunk::nextRange(at, recordedTo, MIN, MAX)) {
+        while (auto r = PreviewChunk::nextRange(at, recordedTo, MIN, MAX, 0)) {
             QCOMPARE(r->from, at);
             QVERIFY(r->to > r->from);
             at = r->to;
@@ -115,16 +115,71 @@ private slots:
 
     void unboundedWhenMaxIsZero() {
 
-        auto r = PreviewChunk::nextRange(0, 10 * MAX, MIN, 0);
+        auto r = PreviewChunk::nextRange(0, 10 * MAX, MIN, 0, 0);
         QVERIFY(r.has_value());
         QCOMPARE(r->to, 10 * MAX);
     }
 
     void negativeStartIsClamped() {
 
-        auto r = PreviewChunk::nextRange(-500, 50000, MIN, MAX);
+        auto r = PreviewChunk::nextRange(-500, 50000, MIN, MAX, 0);
         QVERIFY(r.has_value());
         QCOMPARE(r->from, sv_frame_t(0));
+    }
+
+    // ---- revisiting -------------------------------------------------
+
+    void revisitReachesBackIntoThepreviousRegion() {
+
+        // Notes have duration and would be cut in two at a region
+        // boundary. Reaching back lets the note tracker see the
+        // surrounding audio and emit the note whole; the caller replaces
+        // its earlier results for the revisited part.
+        const sv_frame_t revisit = 66150;   // 1.5s at 44.1kHz
+
+        auto r = PreviewChunk::nextRange(200000, 250000, MIN, MAX, revisit);
+        QVERIFY(r.has_value());
+        QCOMPARE(r->from, sv_frame_t(200000 - revisit));
+        QCOMPARE(r->to, sv_frame_t(250000));
+    }
+
+    void revisitDoesNotChangeHowFarWeGet() {
+
+        // Only the start moves back: the region must still end at the
+        // recording head, or analysis would never catch up
+        auto plain = PreviewChunk::nextRange(200000, 250000, MIN, MAX, 0);
+        auto revisited = PreviewChunk::nextRange(200000, 250000, MIN, MAX, 66150);
+
+        QVERIFY(plain.has_value() && revisited.has_value());
+        QCOMPARE(revisited->to, plain->to);
+        QVERIFY(revisited->from < plain->from);
+    }
+
+    void revisitIsClampedAtTheStartOfTheRecording() {
+
+        auto r = PreviewChunk::nextRange(20000, 50000, MIN, MAX, 66150);
+        QVERIFY(r.has_value());
+        QCOMPARE(r->from, sv_frame_t(0));
+    }
+
+    void revisitStillTerminates() {
+
+        // Revisiting must not stop analysis advancing: the end still
+        // moves forward every pass even though the start moves back
+        const sv_frame_t recordedTo = MAX * 3 + 5000;
+        const sv_frame_t revisit = 66150;
+
+        sv_frame_t at = 0;
+        int iterations = 0;
+
+        while (auto r = PreviewChunk::nextRange(at, recordedTo, MIN, MAX,
+                                                revisit)) {
+            QVERIFY(r->to > at);
+            at = r->to;
+            QVERIFY(++iterations < 100);
+        }
+
+        QVERIFY(recordedTo - at < MIN);
     }
 
     // ---- withinRange ------------------------------------------------

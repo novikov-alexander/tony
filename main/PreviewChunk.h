@@ -43,20 +43,33 @@ struct Range {
  * Return the next region of a growing recording to analyse, given how
  * far analysis has already reached and how far the recording has got.
  *
- * Successive ranges are adjacent and never overlap, so their results
- * can simply be concatenated: there is nothing to merge or de-duplicate.
- * The range never runs backwards, so a duration notification that
- * arrives out of order cannot cause the preview to rewrite itself.
+ * The region starts revisitFrames before the end of the previous one,
+ * so each pass re-analyses a short tail of what it did last time. The
+ * caller is expected to discard its earlier results for that tail and
+ * replace them wholesale.
  *
- * Returns nothing if there is less than minFrames of new audio, so that
- * we don't spend more time starting transforms than running them. A
- * range is clamped to maxFrames (when positive) so that a long stall
- * results in several ordinary chunks rather than one huge one.
+ * That matters for notes, which have duration and would otherwise be
+ * chopped in two wherever a region boundary fell in the middle of one.
+ * Revisiting gives the plugin's note tracker the surrounding audio and
+ * lets it produce the note whole. Because a preview owns everything it
+ * draws, replacing a region is just a delete and an add -- there is
+ * nothing to merge, and no heuristic deciding which of two overlapping
+ * notes to believe.
+ *
+ * The region never starts later than the previous one ended, so a
+ * duration notification arriving out of order cannot make the preview
+ * rewrite material it has already settled.
+ *
+ * Returns nothing if there is less than minFrames of new audio, so we
+ * don't spend more time starting transforms than running them. The new
+ * audio is clamped to maxFrames (when positive) so that a long stall
+ * results in several ordinary passes rather than one huge one.
  */
 std::optional<Range> nextRange(sv::sv_frame_t analysedTo,
                                sv::sv_frame_t recordedTo,
                                sv::sv_frame_t minFrames,
-                               sv::sv_frame_t maxFrames);
+                               sv::sv_frame_t maxFrames,
+                               sv::sv_frame_t revisitFrames);
 
 /**
  * Return only those events whose frame lies within the given range.
