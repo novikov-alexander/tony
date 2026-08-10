@@ -1036,6 +1036,7 @@ tony_main_files = [
   'main/MainWindow.cpp',
   'main/NetworkPermissionTester.cpp',
   'main/PreviewChunk.cpp',
+  'main/RecordScroll.cpp',
   'main/RecordingPreview.cpp',
 ]
 
@@ -1049,6 +1050,7 @@ tony_main_moc_files = qt.preprocess(
 tony_main_test_moc_files = qt.preprocess(
   moc_headers: [
   'main/test/TestPreviewChunk.h',
+  'main/test/TestRecordScroll.h',
 ])
 
 qt_resource_files = qt.preprocess(
@@ -1223,6 +1225,7 @@ tony_main_test_exe = executable(
   'test-tony-main',
   tony_main_test_moc_files,
   'main/PreviewChunk.cpp',
+  'main/RecordScroll.cpp',
   'main/test/tony-main-test.cpp',
   include_directories: [
     'main',

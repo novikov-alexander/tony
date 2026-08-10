@@ -18,6 +18,7 @@
 #include "MainWindow.h"
 #include "NetworkPermissionTester.h"
 #include "Analyser.h"
+#include "RecordScroll.h"
 
 #include "framework/Document.h"
 #include "framework/VersionTester.h"
@@ -123,7 +124,8 @@ MainWindow::MainWindow(AudioMode audioMode,
     m_selectionAnchor(0),
     m_withSonification(withSonification),
     m_withSpectrogram(withSpectrogram),
-    m_recordPreviewAttempted(false)
+    m_recordPreviewAttempted(false),
+    m_recordScrolling(false)
 {
     setWindowTitle(QApplication::applicationName());
 
@@ -188,6 +190,9 @@ MainWindow::MainWindow(AudioMode audioMode,
 
     connect(m_viewManager, SIGNAL(selectionChangedByUser()),
 	    this, SLOT(selectionChangedByUser()));
+
+    connect(m_viewManager, SIGNAL(playbackFrameChanged(sv_frame_t)),
+	    this, SLOT(recordScrollFrameChanged(sv_frame_t)));
 
     QFrame *frame = new QFrame;
     setCentralWidget(frame);
@@ -781,6 +786,12 @@ MainWindow::setupAnalysisMenu()
     connect(m_recordPreview, SIGNAL(triggered()), this, SLOT(recordPreviewToggled()));
     menu->addAction(m_recordPreview);
 
+    m_recordScroll = new QAction(tr("&Scroll to Follow Recording"), this);
+    m_recordScroll->setStatusTip(tr("Scroll the view while recording, so that the recording position stays near the right-hand edge of the pane instead of jumping a page at a time."));
+    m_recordScroll->setCheckable(true);
+    connect(m_recordScroll, SIGNAL(triggered()), this, SLOT(recordScrollToggled()));
+    menu->addAction(m_recordScroll);
+
     action = new QAction(tr("&Analyse Now!"), this);
     action->setStatusTip(tr("Trigger analysis of pitches and notes. (This will delete all existing pitches and notes.)"));
     connect(action, SIGNAL(triggered()), this, SLOT(analyseNow()));
@@ -854,7 +865,8 @@ MainWindow::updateAnalyseStates()
         { "lowamp-analysis", m_lowamp },
         { "onset-analysis", m_onset },
         { "prune-analysis", m_prune },
-        { "record-preview", m_recordPreview }
+        { "record-preview", m_recordPreview },
+        { "record-scroll", m_recordScroll }
     };
 
     auto keyMap = Analyser::getAnalysisSettings();
@@ -904,12 +916,39 @@ MainWindow::recordPreviewToggled()
 }
 
 void
+MainWindow::recordScrollToggled()
+{
+    QAction *a = qobject_cast<QAction *>(sender());
+    if (!a) return;
+
+    QSettings settings;
+    settings.beginGroup("Analyser");
+    settings.setValue("record-scroll", a->isChecked());
+    settings.endGroup();
+
+    updateAnalyseStates();
+}
+
+void
 MainWindow::recordStatusChanged(bool recording)
 {
     if (recording) {
+
         m_recordPreviewAttempted = false;
+
+        // Latched for the whole take, so that toggling the menu item
+        // part way through cannot change the behaviour under the
+        // performer. Reading it here is safe even though record() is
+        // about to discard the session -- we only set a flag.
+        QSettings settings;
+        settings.beginGroup("Analyser");
+        m_recordScrolling = settings.value("record-scroll", false).toBool();
+        settings.endGroup();
+
         return;
     }
+
+    m_recordScrolling = false;
 
     // Everything the preview added is removed here. The pitch and note
     // layers are then regenerated in full from the completed recording,
@@ -950,6 +989,55 @@ MainWindow::recordDurationChanged(sv_frame_t frame, sv_samplerate_t rate)
     }
 
     m_analyser->recordingPreviewReachedFrame(frame);
+}
+
+void
+MainWindow::recordScrollFrameChanged(sv_frame_t)
+{
+    // This also runs throughout ordinary playback, many times a second,
+    // so the cheapest test comes first
+    if (!m_recordScrolling) return;
+
+    if (!m_viewManager || !m_viewManager->isRecording()) return;
+    if (!m_paneStack) return;
+
+    Pane *pane = m_paneStack->getPane(0);
+    if (!pane) return;
+
+    // Leave the view alone while the user is working in it. These are
+    // the same conditions a pane uses to decide that something is going
+    // on and it should not scroll underneath them.
+    if (QApplication::mouseButtons() != Qt::NoButton) return;
+    if (QApplication::keyboardModifiers() & Qt::AltModifier) return;
+
+    sv_frame_t centre = RecordScroll::centreFrameFor
+        (m_viewManager->getPlaybackFrame(),
+         pane->width(),
+         pane->getZoomLevel(),
+         RecordScroll::defaultAnchor);
+
+    if (centre == m_viewManager->getGlobalCentreFrame()) return;
+
+    // Both panes follow the global centre frame, and this route reaches
+    // them through the non-emitting View::setCentreFrame, so it neither
+    // fills the activity log with scroll entries nor moves the
+    // transport.
+    m_viewManager->setGlobalCentreFrame(centre);
+}
+
+void
+MainWindow::globalCentreFrameChanged(sv_frame_t f)
+{
+    // While we are scrolling to follow a recording, the status bar
+    // should go on showing the recording duration rather than being
+    // overwritten with the visible range several times a second. Only
+    // this path is suppressed; the selection and zoom readouts are
+    // untouched.
+    if (m_recordScrolling && m_viewManager && m_viewManager->isRecording()) {
+        return;
+    }
+
+    MainWindowBase::globalCentreFrameChanged(f);
 }
 
 void
@@ -1794,6 +1882,7 @@ MainWindow::closeSession()
     if (!checkSaveModified()) return;
 
     m_analyser->fileClosed();
+    m_recordScrolling = false;
 
     while (m_paneStack->getPaneCount() > 0) {
 

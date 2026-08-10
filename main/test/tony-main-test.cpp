@@ -13,6 +13,7 @@
 */
 
 #include "TestPreviewChunk.h"
+#include "TestRecordScroll.h"
 
 #include "system/Init.h"
 
@@ -30,6 +31,11 @@ int main(int argc, char *argv[])
 
     {
         TestPreviewChunk t;
+        if (QTest::qExec(&t, argc, argv) == 0) ++good;
+        else ++bad;
+    }
+    {
+        TestRecordScroll t;
         if (QTest::qExec(&t, argc, argv) == 0) ++good;
         else ++bad;
     }

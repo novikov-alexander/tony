@@ -90,7 +90,9 @@ protected slots:
     virtual void resetAnalyseOptions();
     virtual void autoAnalysisToggled();
     virtual void recordPreviewToggled();
+    virtual void recordScrollToggled();
     virtual void recordStatusChanged(bool);
+    virtual void recordScrollFrameChanged(sv::sv_frame_t);
     virtual void precisionAnalysisToggled();
     virtual void lowampAnalysisToggled();
     virtual void onsetAnalysisToggled();
@@ -208,6 +210,7 @@ protected:
 
     QAction       *m_autoAnalyse;
     QAction       *m_recordPreview;
+    QAction       *m_recordScroll;
     QAction       *m_precise;
     QAction       *m_lowamp;
     QAction       *m_onset;
@@ -238,6 +241,10 @@ protected:
     // recording starts; this stops us retrying every update if it fails
     bool m_recordPreviewAttempted;
 
+    // Latched when recording starts, so that toggling the menu item
+    // cannot change the behaviour half way through a take
+    bool m_recordScrolling;
+
     Analyser::FrequencyRange m_pendingConstraint;
 
     QString exportToSVL(QString path, sv::Layer *layer);
@@ -262,6 +269,7 @@ protected:
     bool waitForInitialAnalysis();
 
     virtual void recordDurationChanged(sv::sv_frame_t, sv::sv_samplerate_t);
+    virtual void globalCentreFrameChanged(sv::sv_frame_t);
 
     virtual void updateVisibleRangeDisplay(sv::Pane *p) const;
     virtual void updatePositionStatusDisplays() const;

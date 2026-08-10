@@ -83,7 +83,8 @@ Analyser::getAnalysisSettings()
              { "lowamp-analysis", true },
              { "onset-analysis", true },
              { "prune-analysis", true },
-             { "record-preview", false }
+             { "record-preview", false },
+             { "record-scroll", false }
     };
 }
 
