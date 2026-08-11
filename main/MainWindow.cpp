@@ -941,6 +941,10 @@ MainWindow::recordStatusChanged(bool recording)
         m_recordScrolling = settings.value("record-scroll", false).toBool();
         settings.endGroup();
 
+        SVCERR << "MainWindow::recordStatusChanged: recording started, "
+               << "scroll-to-follow is "
+               << (m_recordScrolling ? "on" : "off") << endl;
+
         return;
     }
 
@@ -958,12 +962,14 @@ MainWindow::recordDurationChanged(sv_frame_t frame, sv_samplerate_t rate)
 {
     MainWindowBase::recordDurationChanged(frame, rate);
 
+    // Re-asserted on every update rather than applied once. Panes are
+    // created with, and reset to, the page-at-a-time follow mode in
+    // several places -- including while a recording is starting -- so a
+    // single application can be silently undone. setRecordingFollow
+    // only touches a pane whose mode is not already what we want, so
+    // repeating it costs nothing.
     if (m_recordScrolling) {
-        // Applied here rather than when recording started: record()
-        // rebuilds the panes, and resets their follow mode, after that
-        // point but before the first duration update arrives
         setRecordingFollow(true);
-        m_recordScrolling = false;
     }
 
     if (!m_analyser->isRecordingPreviewActive()) {
@@ -1003,18 +1009,28 @@ MainWindow::setRecordingFollow(bool following)
 
     // Every pane in Tony is created with PlaybackScrollPage, so that is
     // what to put back afterwards; there is no per-pane state to save.
+    PlaybackFollowMode wanted =
+        following ? PlaybackScrollContinuous : PlaybackScrollPage;
+
+    double anchor = following ? RECORD_FOLLOW_ANCHOR : 0.5;
+
     for (int i = 0; i < m_paneStack->getPaneCount(); ++i) {
 
         Pane *pane = m_paneStack->getPane(i);
         if (!pane) continue;
 
-        if (following) {
-            pane->setPlaybackFollowAnchor(RECORD_FOLLOW_ANCHOR);
-            pane->setPlaybackFollow(PlaybackScrollContinuous);
-        } else {
-            pane->setPlaybackFollow(PlaybackScrollPage);
-            pane->setPlaybackFollowAnchor(0.5);
+        if (pane->getPlaybackFollow() == wanted &&
+            pane->getPlaybackFollowAnchor() == anchor) {
+            continue;
         }
+
+        SVCERR << "MainWindow::setRecordingFollow: pane " << i
+               << " was in follow mode " << int(pane->getPlaybackFollow())
+               << ", setting " << int(wanted)
+               << " with anchor " << anchor << endl;
+
+        pane->setPlaybackFollowAnchor(anchor);
+        pane->setPlaybackFollow(wanted);
     }
 }
 
