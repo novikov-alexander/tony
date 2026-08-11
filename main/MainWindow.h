@@ -240,9 +240,11 @@ protected:
     // recording starts; this stops us retrying every update if it fails
     bool m_recordPreviewAttempted;
 
-    // Latched when recording starts, so that toggling the menu item
-    // cannot change the behaviour half way through a take
+    // Latched on the first duration update of a recording, so that
+    // toggling the menu item cannot change the behaviour half way
+    // through a take
     bool m_recordScrolling;
+    bool m_recordScrollAttempted;
 
     Analyser::FrequencyRange m_pendingConstraint;
 

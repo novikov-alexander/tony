@@ -124,7 +124,8 @@ MainWindow::MainWindow(AudioMode audioMode,
     m_withSonification(withSonification),
     m_withSpectrogram(withSpectrogram),
     m_recordPreviewAttempted(false),
-    m_recordScrolling(false)
+    m_recordScrolling(false),
+    m_recordScrollAttempted(false)
 {
     setWindowTitle(QApplication::applicationName());
 
@@ -931,20 +932,12 @@ MainWindow::recordStatusChanged(bool recording)
     if (recording) {
 
         m_recordPreviewAttempted = false;
+        m_recordScrollAttempted = false;
 
-        // Latched for the whole take, so that toggling the menu item
-        // part way through cannot change the behaviour under the
-        // performer. Reading it here is safe even though record() is
-        // about to discard the session -- we only set a flag.
-        QSettings settings;
-        settings.beginGroup("Analyser");
-        m_recordScrolling = settings.value("record-scroll", false).toBool();
-        settings.endGroup();
-
-        SVCERR << "MainWindow::recordStatusChanged: recording started, "
-               << "scroll-to-follow is "
-               << (m_recordScrolling ? "on" : "off") << endl;
-
+        // Deliberately not reading the setting here. record() emits this
+        // from startRecording() and only then closes the old session,
+        // which resets the flags. Anything latched at this point is
+        // discarded before it can be used.
         return;
     }
 
@@ -962,12 +955,26 @@ MainWindow::recordDurationChanged(sv_frame_t frame, sv_samplerate_t rate)
 {
     MainWindowBase::recordDurationChanged(frame, rate);
 
+    if (!m_recordScrollAttempted) {
+
+        m_recordScrollAttempted = true;
+
+        // Read here rather than when recording started, because
+        // closeSession() runs in between and resets the flag
+        QSettings settings;
+        settings.beginGroup("Analyser");
+        m_recordScrolling = settings.value("record-scroll", false).toBool();
+        settings.endGroup();
+
+        SVCERR << "MainWindow::recordDurationChanged: scroll to follow is "
+               << (m_recordScrolling ? "on" : "off") << endl;
+    }
+
     // Re-asserted on every update rather than applied once. Panes are
     // created with, and reset to, the page-at-a-time follow mode in
-    // several places -- including while a recording is starting -- so a
-    // single application can be silently undone. setRecordingFollow
-    // only touches a pane whose mode is not already what we want, so
-    // repeating it costs nothing.
+    // several places, so a single application can be silently undone.
+    // setRecordingFollow only touches a pane that is not already in the
+    // wanted mode, so repeating it costs nothing.
     if (m_recordScrolling) {
         setRecordingFollow(true);
     }
