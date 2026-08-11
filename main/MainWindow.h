@@ -92,7 +92,6 @@ protected slots:
     virtual void recordPreviewToggled();
     virtual void recordScrollToggled();
     virtual void recordStatusChanged(bool);
-    virtual void recordScrollFrameChanged(sv::sv_frame_t);
     virtual void precisionAnalysisToggled();
     virtual void lowampAnalysisToggled();
     virtual void onsetAnalysisToggled();
@@ -269,7 +268,15 @@ protected:
     bool waitForInitialAnalysis();
 
     virtual void recordDurationChanged(sv::sv_frame_t, sv::sv_samplerate_t);
-    virtual void globalCentreFrameChanged(sv::sv_frame_t);
+
+    // Hold the recording position at a fixed point in the pane while
+    // recording, rather than letting the view jump a page at a time
+    void setRecordingFollow(bool following);
+
+    // Fraction of the pane width at which the recording position sits.
+    // Enough of the pane behind it to see what has just been played,
+    // and a little ahead of it so the pointer is not on the edge.
+    static constexpr double RECORD_FOLLOW_ANCHOR = 0.8;
 
     virtual void updateVisibleRangeDisplay(sv::Pane *p) const;
     virtual void updatePositionStatusDisplays() const;

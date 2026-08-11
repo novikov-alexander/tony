@@ -18,7 +18,6 @@
 #include "MainWindow.h"
 #include "NetworkPermissionTester.h"
 #include "Analyser.h"
-#include "RecordScroll.h"
 
 #include "framework/Document.h"
 #include "framework/VersionTester.h"
@@ -190,9 +189,6 @@ MainWindow::MainWindow(AudioMode audioMode,
 
     connect(m_viewManager, SIGNAL(selectionChangedByUser()),
 	    this, SLOT(selectionChangedByUser()));
-
-    connect(m_viewManager, SIGNAL(playbackFrameChanged(sv_frame_t)),
-	    this, SLOT(recordScrollFrameChanged(sv_frame_t)));
 
     QFrame *frame = new QFrame;
     setCentralWidget(frame);
@@ -949,6 +945,7 @@ MainWindow::recordStatusChanged(bool recording)
     }
 
     m_recordScrolling = false;
+    setRecordingFollow(false);
 
     // Everything the preview added is removed here. The pitch and note
     // layers are then regenerated in full from the completed recording,
@@ -960,6 +957,14 @@ void
 MainWindow::recordDurationChanged(sv_frame_t frame, sv_samplerate_t rate)
 {
     MainWindowBase::recordDurationChanged(frame, rate);
+
+    if (m_recordScrolling) {
+        // Applied here rather than when recording started: record()
+        // rebuilds the panes, and resets their follow mode, after that
+        // point but before the first duration update arrives
+        setRecordingFollow(true);
+        m_recordScrolling = false;
+    }
 
     if (!m_analyser->isRecordingPreviewActive()) {
 
@@ -992,52 +997,25 @@ MainWindow::recordDurationChanged(sv_frame_t frame, sv_samplerate_t rate)
 }
 
 void
-MainWindow::recordScrollFrameChanged(sv_frame_t)
+MainWindow::setRecordingFollow(bool following)
 {
-    // This also runs throughout ordinary playback, many times a second,
-    // so the cheapest test comes first
-    if (!m_recordScrolling) return;
-
-    if (!m_viewManager || !m_viewManager->isRecording()) return;
     if (!m_paneStack) return;
 
-    Pane *pane = m_paneStack->getPane(0);
-    if (!pane) return;
+    // Every pane in Tony is created with PlaybackScrollPage, so that is
+    // what to put back afterwards; there is no per-pane state to save.
+    for (int i = 0; i < m_paneStack->getPaneCount(); ++i) {
 
-    // Leave the view alone while the user is working in it. These are
-    // the same conditions a pane uses to decide that something is going
-    // on and it should not scroll underneath them.
-    if (QApplication::mouseButtons() != Qt::NoButton) return;
-    if (QApplication::keyboardModifiers() & Qt::AltModifier) return;
+        Pane *pane = m_paneStack->getPane(i);
+        if (!pane) continue;
 
-    sv_frame_t centre = RecordScroll::centreFrameFor
-        (m_viewManager->getPlaybackFrame(),
-         pane->width(),
-         pane->getZoomLevel(),
-         RecordScroll::defaultAnchor);
-
-    if (centre == m_viewManager->getGlobalCentreFrame()) return;
-
-    // Both panes follow the global centre frame, and this route reaches
-    // them through the non-emitting View::setCentreFrame, so it neither
-    // fills the activity log with scroll entries nor moves the
-    // transport.
-    m_viewManager->setGlobalCentreFrame(centre);
-}
-
-void
-MainWindow::globalCentreFrameChanged(sv_frame_t f)
-{
-    // While we are scrolling to follow a recording, the status bar
-    // should go on showing the recording duration rather than being
-    // overwritten with the visible range several times a second. Only
-    // this path is suppressed; the selection and zoom readouts are
-    // untouched.
-    if (m_recordScrolling && m_viewManager && m_viewManager->isRecording()) {
-        return;
+        if (following) {
+            pane->setPlaybackFollowAnchor(RECORD_FOLLOW_ANCHOR);
+            pane->setPlaybackFollow(PlaybackScrollContinuous);
+        } else {
+            pane->setPlaybackFollow(PlaybackScrollPage);
+            pane->setPlaybackFollowAnchor(0.5);
+        }
     }
-
-    MainWindowBase::globalCentreFrameChanged(f);
 }
 
 void
